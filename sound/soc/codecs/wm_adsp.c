@@ -21,7 +21,6 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <sound/core.h>
@@ -112,22 +111,22 @@
 #define ADSP1_CLK_SEL_SHIFT                    0  /* CLK_SEL_ENA */
 #define ADSP1_CLK_SEL_WIDTH                    3  /* CLK_SEL_ENA */
 
-#define ADSP2_CONTROL                     0x0
-#define ADSP2_CLOCKING                    0x1
-#define ADSP2V2_CLOCKING                  0x2
-#define ADSP2_STATUS1                     0x4
-#define ADSP2_WDMA_CONFIG_1               0x30
-#define ADSP2_WDMA_CONFIG_2               0x31
-#define ADSP2V2_WDMA_CONFIG_2             0x32
-#define ADSP2_RDMA_CONFIG_1               0x34
+#define ADSP2_CONTROL		0x0
+#define ADSP2_CLOCKING		0x1
+#define ADSP2V2_CLOCKING	0x2
+#define ADSP2_STATUS1		0x4
+#define ADSP2_WDMA_CONFIG_1	0x30
+#define ADSP2_WDMA_CONFIG_2	0x31
+#define ADSP2V2_WDMA_CONFIG_2	0x32
+#define ADSP2_RDMA_CONFIG_1	0x34
 
-#define ADSP2_SCRATCH0                    0x40
-#define ADSP2_SCRATCH1                    0x41
-#define ADSP2_SCRATCH2                    0x42
-#define ADSP2_SCRATCH3                    0x43
+#define ADSP2_SCRATCH0		0x40
+#define ADSP2_SCRATCH1		0x41
+#define ADSP2_SCRATCH2		0x42
+#define ADSP2_SCRATCH3		0x43
 
-#define ADSP2V2_SCRATCH0_1                0x40
-#define ADSP2V2_SCRATCH2_3                0x42
+#define ADSP2V2_SCRATCH0_1	0x40
+#define ADSP2V2_SCRATCH2_3	0x42
 
 /*
  * ADSP2 Control
@@ -160,13 +159,13 @@
 /*
  * ADSP2V2 clocking
  */
-#define ADSP2V2_CLK_SEL_MASK             0x70000  /* CLK_SEL_ENA */
-#define ADSP2V2_CLK_SEL_SHIFT                 16  /* CLK_SEL_ENA */
-#define ADSP2V2_CLK_SEL_WIDTH                  3  /* CLK_SEL_ENA */
+#define ADSP2V2_CLK_SEL_MASK               0x70000 /* CLK_SEL_ENA */
+#define ADSP2V2_CLK_SEL_SHIFT                   16  /* CLK_SEL_ENA */
+#define ADSP2V2_CLK_SEL_WIDTH                    3  /* CLK_SEL_ENA */
 
-#define ADSP2V2_RATE_MASK                 0x7800  /* DSP_RATE */
-#define ADSP2V2_RATE_SHIFT                    11  /* DSP_RATE */
-#define ADSP2V2_RATE_WIDTH                     4  /* DSP_RATE */
+#define ADSP2V2_RATE_MASK                   0x7800  /* DSP_RATE */
+#define ADSP2V2_RATE_SHIFT                      11  /* DSP_RATE */
+#define ADSP2V2_RATE_WIDTH                       4  /* DSP_RATE */
 
 /*
  * ADSP2 Status 1
@@ -209,16 +208,6 @@
 
 #define ADSP_MAX_STD_CTRL_SIZE               512
 
-#define WM_ADSP_ACKED_CTL_TIMEOUT_MS         100
-#define WM_ADSP_ACKED_CTL_N_QUICKPOLLS       10
-#define WM_ADSP_ACKED_CTL_MIN_VALUE          0
-#define WM_ADSP_ACKED_CTL_MAX_VALUE          0xFFFFFF
-
-/*
- * Event control messages
- */
-#define WM_ADSP_FW_EVENT_SHUTDOWN            0x000001
-
 struct wm_adsp_buf {
 	struct list_head list;
 	void *buf;
@@ -232,12 +221,11 @@ static struct wm_adsp_buf *wm_adsp_buf_alloc(const void *src, size_t len,
 	if (buf == NULL)
 		return NULL;
 
-	buf->buf = vmalloc(len);
+	buf->buf = kmemdup(src, len, GFP_KERNEL | GFP_DMA);
 	if (!buf->buf) {
 		kfree(buf);
 		return NULL;
 	}
-	memcpy(buf->buf, src, len);
 
 	if (list)
 		list_add_tail(&buf->list, list);
@@ -252,7 +240,7 @@ static void wm_adsp_buf_free(struct list_head *list)
 							   struct wm_adsp_buf,
 							   list);
 		list_del(&buf->list);
-		vfree(buf->buf);
+		kfree(buf->buf);
 		kfree(buf);
 	}
 }
@@ -338,24 +326,11 @@ struct wm_adsp_compr_buf {
 
 	struct wm_adsp_buffer_region *regions;
 	u32 host_buf_ptr;
-
 	u32 error;
 	u32 irq_count;
 	int read_index;
 	int avail;
-};
-
-struct wm_adsp_compr {
-	struct wm_adsp *dsp;
-	struct wm_adsp_compr_buf *buf;
-
-	struct snd_compr_stream *stream;
-	struct snd_compressed_buffer size;
-
-	u32 *raw_buf;
-	unsigned int copied_total;
-
-	unsigned int sample_rate;
+	int num;
 };
 
 #define WM_ADSP_DATA_WORD_SIZE         3
@@ -366,6 +341,7 @@ struct wm_adsp_compr {
 #define WM_ADSP_MAX_FRAGMENT_SIZE      (4096 * WM_ADSP_DATA_WORD_SIZE)
 
 #define WM_ADSP_ALG_XM_STRUCT_MAGIC    0x49aec7
+#define WM_ADSP_ALG_XM2_STRUCT_MAGIC   0x2e07b0
 
 #define HOST_BUFFER_FIELD(field) \
 	(offsetof(struct wm_adsp_buffer, field) / sizeof(__be32))
@@ -482,6 +458,8 @@ struct wm_coeff_ctl_ops {
 		    struct snd_ctl_elem_value *ucontrol);
 	int (*xput)(struct snd_kcontrol *kcontrol,
 		    struct snd_ctl_elem_value *ucontrol);
+	int (*xinfo)(struct snd_kcontrol *kcontrol,
+		     struct snd_ctl_elem_info *uinfo);
 };
 
 struct wm_coeff_ctl {
@@ -496,28 +474,10 @@ struct wm_coeff_ctl {
 	unsigned int offset;
 	size_t len;
 	unsigned int set:1;
+	struct snd_kcontrol *kcontrol;
 	struct soc_bytes_ext bytes_ext;
 	unsigned int flags;
-	unsigned int type;
 };
-
-static const char *wm_adsp_mem_region_name(unsigned int type)
-{
-	switch (type) {
-	case WMFW_ADSP1_PM:
-		return "PM";
-	case WMFW_ADSP1_DM:
-		return "DM";
-	case WMFW_ADSP2_XM:
-		return "XM";
-	case WMFW_ADSP2_YM:
-		return "YM";
-	case WMFW_ADSP1_ZM:
-		return "ZM";
-	default:
-		return NULL;
-	}
-}
 
 #ifdef CONFIG_DEBUG_FS
 static void wm_adsp_debugfs_save_wmfwname(struct wm_adsp *dsp, const char *s)
@@ -553,7 +513,7 @@ static ssize_t wm_adsp_debugfs_wmfw_read(struct file *file,
 
 	mutex_lock(&dsp->pwr_lock);
 
-	if (!dsp->wmfw_file_name || !dsp->booted)
+	if (!dsp->wmfw_file_name || !dsp->running)
 		ret = 0;
 	else
 		ret = simple_read_from_buffer(user_buf, count, ppos,
@@ -573,7 +533,7 @@ static ssize_t wm_adsp_debugfs_bin_read(struct file *file,
 
 	mutex_lock(&dsp->pwr_lock);
 
-	if (!dsp->bin_file_name || !dsp->booted)
+	if (!dsp->bin_file_name || !dsp->running)
 		ret = 0;
 	else
 		ret = simple_read_from_buffer(user_buf, count, ppos,
@@ -625,9 +585,6 @@ static void wm_adsp2_init_debugfs(struct wm_adsp *dsp,
 	kfree(root_name);
 
 	if (!root)
-		goto err;
-
-	if (!debugfs_create_bool("booted", S_IRUGO, root, &dsp->booted))
 		goto err;
 
 	if (!debugfs_create_bool("running", S_IRUGO, root, &dsp->running))
@@ -713,7 +670,7 @@ static int wm_adsp_fw_put(struct snd_kcontrol *kcontrol,
 
 	mutex_lock(&dsp[e->shift_l].pwr_lock);
 
-	if (dsp[e->shift_l].booted || dsp[e->shift_l].compr)
+	if (dsp[e->shift_l].running || dsp[e->shift_l].compr[0])
 		ret = -EBUSY;
 	else
 		dsp[e->shift_l].fw = ucontrol->value.enumerated.item[0];
@@ -787,41 +744,38 @@ static unsigned int wm_adsp_region_to_reg(struct wm_adsp_region const *mem,
 
 static void wm_adsp2_show_fw_status(struct wm_adsp *dsp)
 {
-	unsigned int scratch[4];
-	unsigned int addr = dsp->base + ADSP2_SCRATCH0;
-	unsigned int i;
+	u16 scratch[4];
 	int ret;
 
-	for (i = 0; i < ARRAY_SIZE(scratch); ++i) {
-		ret = regmap_read(dsp->regmap, addr + i, &scratch[i]);
-		if (ret) {
-			adsp_err(dsp, "Failed to read SCRATCH%u: %d\n", i, ret);
-			return;
-		}
+	ret = regmap_raw_read(dsp->regmap, dsp->base + ADSP2_SCRATCH0,
+				scratch, sizeof(scratch));
+	if (ret) {
+		adsp_err(dsp, "Failed to read SCRATCH regs: %d\n", ret);
+		return;
 	}
 
 	adsp_dbg(dsp, "FW SCRATCH 0:0x%x 1:0x%x 2:0x%x 3:0x%x\n",
-		 scratch[0], scratch[1], scratch[2], scratch[3]);
+		 be16_to_cpu(scratch[0]),
+		 be16_to_cpu(scratch[1]),
+		 be16_to_cpu(scratch[2]),
+		 be16_to_cpu(scratch[3]));
 }
 
 static void wm_adsp2v2_show_fw_status(struct wm_adsp *dsp)
 {
-	unsigned int scratch[2];
+	u32 scratch[2];
 	int ret;
 
-	ret = regmap_read(dsp->regmap, dsp->base + ADSP2V2_SCRATCH0_1,
-			  &scratch[0]);
+	ret = regmap_raw_read(dsp->regmap, dsp->base + ADSP2V2_SCRATCH0_1,
+				scratch, sizeof(scratch));
+
 	if (ret) {
-		adsp_err(dsp, "Failed to read SCRATCH0_1: %d\n", ret);
+		adsp_err(dsp, "Failed to read SCRATCH regs: %d\n", ret);
 		return;
 	}
 
-	ret = regmap_read(dsp->regmap, dsp->base + ADSP2V2_SCRATCH2_3,
-			  &scratch[1]);
-	if (ret) {
-		adsp_err(dsp, "Failed to read SCRATCH2_3: %d\n", ret);
-		return;
-	}
+	scratch[0] = be32_to_cpu(scratch[0]);
+	scratch[1] = be32_to_cpu(scratch[1]);
 
 	adsp_dbg(dsp, "FW SCRATCH 0:0x%x 1:0x%x 2:0x%x 3:0x%x\n",
 		 scratch[0] & 0xFFFF,
@@ -835,11 +789,27 @@ static inline struct wm_coeff_ctl *bytes_ext_to_ctl(struct soc_bytes_ext *ext)
 	return container_of(ext, struct wm_coeff_ctl, bytes_ext);
 }
 
-static int wm_coeff_base_reg(struct wm_coeff_ctl *ctl, unsigned int *reg)
+static int wm_coeff_info(struct snd_kcontrol *kctl,
+			 struct snd_ctl_elem_info *uinfo)
 {
-	const struct wm_adsp_alg_region *alg_region = &ctl->alg_region;
-	struct wm_adsp *dsp = ctl->dsp;
+	struct soc_bytes_ext *bytes_ext =
+		(struct soc_bytes_ext *)kctl->private_value;
+	struct wm_coeff_ctl *ctl = bytes_ext_to_ctl(bytes_ext);
+
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	uinfo->count = ctl->len;
+	return 0;
+}
+
+static int wm_coeff_write_control(struct wm_coeff_ctl *ctl,
+				  const void *buf, size_t len)
+{
+	struct wm_adsp_alg_region *alg_region = &ctl->alg_region;
 	const struct wm_adsp_region *mem;
+	struct wm_adsp *dsp = ctl->dsp;
+	void *scratch;
+	int ret;
+	unsigned int reg;
 
 	mem = wm_adsp_find_region(dsp, alg_region->type);
 	if (!mem) {
@@ -848,106 +818,8 @@ static int wm_coeff_base_reg(struct wm_coeff_ctl *ctl, unsigned int *reg)
 		return -EINVAL;
 	}
 
-	*reg = wm_adsp_region_to_reg(mem, ctl->alg_region.base + ctl->offset);
-
-	return 0;
-}
-
-static int wm_coeff_info(struct snd_kcontrol *kctl,
-			 struct snd_ctl_elem_info *uinfo)
-{
-	struct soc_bytes_ext *bytes_ext =
-		(struct soc_bytes_ext *)kctl->private_value;
-	struct wm_coeff_ctl *ctl = bytes_ext_to_ctl(bytes_ext);
-
-	switch (ctl->type) {
-	case WMFW_CTL_TYPE_ACKED:
-		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
-		uinfo->value.integer.min = WM_ADSP_ACKED_CTL_MIN_VALUE;
-		uinfo->value.integer.max = WM_ADSP_ACKED_CTL_MAX_VALUE;
-		uinfo->value.integer.step = 1;
-		uinfo->count = 1;
-		break;
-	default:
-		uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
-		uinfo->count = ctl->len;
-		break;
-	}
-
-	return 0;
-}
-
-static int wm_coeff_write_acked_control(struct wm_coeff_ctl *ctl,
-					unsigned int event_id)
-{
-	struct wm_adsp *dsp = ctl->dsp;
-	u32 val = cpu_to_be32(event_id);
-	unsigned int reg;
-	int i, ret;
-
-	ret = wm_coeff_base_reg(ctl, &reg);
-	if (ret)
-		return ret;
-
-	adsp_dbg(dsp, "Sending 0x%x to acked control alg 0x%x %s:0x%x\n",
-		 event_id, ctl->alg_region.alg,
-		 wm_adsp_mem_region_name(ctl->alg_region.type), ctl->offset);
-
-	ret = regmap_raw_write(dsp->regmap, reg, &val, sizeof(val));
-	if (ret) {
-		adsp_err(dsp, "Failed to write %x: %d\n", reg, ret);
-		return ret;
-	}
-
-	/*
-	 * Poll for ack, we initially poll at ~1ms intervals for firmwares
-	 * that respond quickly, then go to ~10ms polls. A firmware is unlikely
-	 * to ack instantly so we do the first 1ms delay before reading the
-	 * control to avoid a pointless bus transaction
-	 */
-	for (i = 0; i < WM_ADSP_ACKED_CTL_TIMEOUT_MS;) {
-		switch (i) {
-		case 0 ... WM_ADSP_ACKED_CTL_N_QUICKPOLLS - 1:
-			usleep_range(1000, 2000);
-			i++;
-			break;
-		default:
-			usleep_range(10000, 20000);
-			i += 10;
-			break;
-		}
-
-		ret = regmap_raw_read(dsp->regmap, reg, &val, sizeof(val));
-		if (ret) {
-			adsp_err(dsp, "Failed to read %x: %d\n", reg, ret);
-			return ret;
-		}
-
-		if (val == 0) {
-			adsp_dbg(dsp, "Acked control ACKED at poll %u\n", i);
-			return 0;
-		}
-	}
-
-	adsp_warn(dsp, "Acked control @0x%x alg:0x%x %s:0x%x timed out\n",
-		  reg, ctl->alg_region.alg,
-		  wm_adsp_mem_region_name(ctl->alg_region.type),
-		  ctl->offset);
-
-	return -ETIMEDOUT;
-}
-
-static int wm_coeff_write_control(struct wm_coeff_ctl *ctl,
-				  const void *buf, size_t len)
-{
-	struct wm_adsp *dsp = ctl->dsp;
-	void *scratch;
-	int ret;
-	unsigned int reg;
-
-	ret = wm_coeff_base_reg(ctl, &reg);
-	if (ret)
-		return ret;
+	reg = ctl->alg_region.base + ctl->offset;
+	reg = wm_adsp_region_to_reg(mem, reg);
 
 	scratch = kmemdup(buf, len, GFP_KERNEL | GFP_DMA);
 	if (!scratch)
@@ -1018,41 +890,25 @@ static int wm_coeff_tlv_put(struct snd_kcontrol *kctl,
 	return ret;
 }
 
-static int wm_coeff_put_acked(struct snd_kcontrol *kctl,
-			      struct snd_ctl_elem_value *ucontrol)
-{
-	struct soc_bytes_ext *bytes_ext =
-		(struct soc_bytes_ext *)kctl->private_value;
-	struct wm_coeff_ctl *ctl = bytes_ext_to_ctl(bytes_ext);
-	unsigned int val = ucontrol->value.integer.value[0];
-	int ret;
-
-	if (val == 0)
-		return 0;	/* 0 means no event */
-
-	mutex_lock(&ctl->dsp->pwr_lock);
-
-	if (ctl->enabled && ctl->dsp->running)
-		ret = wm_coeff_write_acked_control(ctl, val);
-	else
-		ret = -EPERM;
-
-	mutex_unlock(&ctl->dsp->pwr_lock);
-
-	return ret;
-}
-
 static int wm_coeff_read_control(struct wm_coeff_ctl *ctl,
 				 void *buf, size_t len)
 {
+	struct wm_adsp_alg_region *alg_region = &ctl->alg_region;
+	const struct wm_adsp_region *mem;
 	struct wm_adsp *dsp = ctl->dsp;
 	void *scratch;
 	int ret;
 	unsigned int reg;
 
-	ret = wm_coeff_base_reg(ctl, &reg);
-	if (ret)
-		return ret;
+	mem = wm_adsp_find_region(dsp, alg_region->type);
+	if (!mem) {
+		adsp_err(dsp, "No base for region %x\n",
+			 alg_region->type);
+		return -EINVAL;
+	}
+
+	reg = ctl->alg_region.base + ctl->offset;
+	reg = wm_adsp_region_to_reg(mem, reg);
 
 	scratch = kmalloc(len, GFP_KERNEL | GFP_DMA);
 	if (!scratch)
@@ -1085,12 +941,12 @@ static int wm_coeff_get(struct snd_kcontrol *kctl,
 	mutex_lock(&ctl->dsp->pwr_lock);
 
 	if (ctl->flags & WMFW_CTL_FLAG_VOLATILE) {
-		if (ctl->enabled && ctl->dsp->running)
+		if (ctl->enabled)
 			ret = wm_coeff_read_control(ctl, p, ctl->len);
 		else
 			ret = -EPERM;
 	} else {
-		if (!ctl->flags && ctl->enabled && ctl->dsp->running)
+		if (!ctl->flags && ctl->enabled)
 			ret = wm_coeff_read_control(ctl, ctl->cache, ctl->len);
 
 		memcpy(p, ctl->cache, ctl->len);
@@ -1112,12 +968,12 @@ static int wm_coeff_tlv_get(struct snd_kcontrol *kctl,
 	mutex_lock(&ctl->dsp->pwr_lock);
 
 	if (ctl->flags & WMFW_CTL_FLAG_VOLATILE) {
-		if (ctl->enabled && ctl->dsp->running)
+		if (ctl->enabled)
 			ret = wm_coeff_read_control(ctl, ctl->cache, size);
 		else
 			ret = -EPERM;
 	} else {
-		if (!ctl->flags && ctl->enabled && ctl->dsp->running)
+		if (!ctl->flags && ctl->enabled)
 			ret = wm_coeff_read_control(ctl, ctl->cache, size);
 	}
 
@@ -1127,21 +983,6 @@ static int wm_coeff_tlv_get(struct snd_kcontrol *kctl,
 	mutex_unlock(&ctl->dsp->pwr_lock);
 
 	return ret;
-}
-
-static int wm_coeff_get_acked(struct snd_kcontrol *kcontrol,
-			      struct snd_ctl_elem_value *ucontrol)
-{
-	/*
-	 * Although it's not useful to read an acked control, we must satisfy
-	 * user-side assumptions that all controls are readable and that a
-	 * write of the same value should be filtered out (it's valid to send
-	 * the same event number again to the firmware). We therefore return 0,
-	 * meaning "no event" so valid event numbers will always be a change
-	 */
-	ucontrol->value.integer.value[0] = 0;
-
-	return 0;
 }
 
 struct wmfw_ctl_work {
@@ -1169,7 +1010,8 @@ static unsigned int wmfw_convert_flags(unsigned int in, unsigned int len)
 	}
 
 	if (in) {
-		out |= rd;
+		if (in & WMFW_CTL_FLAG_READABLE)
+			out |= rd;
 		if (in & WMFW_CTL_FLAG_WRITEABLE)
 			out |= wr;
 		if (in & WMFW_CTL_FLAG_VOLATILE)
@@ -1192,36 +1034,29 @@ static int wmfw_add_ctl(struct wm_adsp *dsp, struct wm_coeff_ctl *ctl)
 	kcontrol = kzalloc(sizeof(*kcontrol), GFP_KERNEL);
 	if (!kcontrol)
 		return -ENOMEM;
+	kcontrol->iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 
 	kcontrol->name = ctl->name;
 	kcontrol->info = wm_coeff_info;
+	kcontrol->get = wm_coeff_get;
+	kcontrol->put = wm_coeff_put;
 	kcontrol->iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	kcontrol->tlv.c = snd_soc_bytes_tlv_callback;
 	kcontrol->private_value = (unsigned long)&ctl->bytes_ext;
+
+	ctl->bytes_ext.max = ctl->len;
+	ctl->bytes_ext.get = wm_coeff_tlv_get;
+	ctl->bytes_ext.put = wm_coeff_tlv_put;
+
 	kcontrol->access = wmfw_convert_flags(ctl->flags, ctl->len);
 
-	switch (ctl->type) {
-	case WMFW_CTL_TYPE_ACKED:
-		kcontrol->get = wm_coeff_get_acked;
-		kcontrol->put = wm_coeff_put_acked;
-		break;
-	default:
-		if (kcontrol->access & SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK) {
-			ctl->bytes_ext.max = ctl->len;
-			ctl->bytes_ext.get = wm_coeff_tlv_get;
-			ctl->bytes_ext.put = wm_coeff_tlv_put;
-		} else {
-			kcontrol->get = wm_coeff_get;
-			kcontrol->put = wm_coeff_put;
-		}
-		break;
-	}
-
-	ret = snd_soc_add_codec_controls(dsp->codec, kcontrol, 1);
+	ret = snd_soc_add_card_controls(dsp->card, kcontrol, 1);
 	if (ret < 0)
 		goto err_kcontrol;
 
 	kfree(kcontrol);
+
+	ctl->kcontrol = snd_soc_card_get_kcontrol(dsp->card, ctl->name);
 
 	return 0;
 
@@ -1267,27 +1102,6 @@ static int wm_coeff_sync_controls(struct wm_adsp *dsp)
 	return 0;
 }
 
-static void wm_adsp_signal_event_controls(struct wm_adsp *dsp,
-					  unsigned int event)
-{
-	struct wm_coeff_ctl *ctl;
-	int ret;
-
-	list_for_each_entry(ctl, &dsp->ctl_list, list) {
-		if (ctl->type != WMFW_CTL_TYPE_HOSTEVENT)
-			continue;
-
-		if (!ctl->enabled)
-			continue;
-
-		ret = wm_coeff_write_acked_control(ctl, event);
-		if (ret)
-			adsp_warn(dsp,
-				  "Failed to send 0x%x event to alg 0x%x (%d)\n",
-				  event, ctl->alg_region.alg, ret);
-	}
-}
-
 static void wm_adsp_ctl_work(struct work_struct *work)
 {
 	struct wmfw_ctl_work *ctl_work = container_of(work,
@@ -1309,16 +1123,34 @@ static int wm_adsp_create_control(struct wm_adsp *dsp,
 				  const struct wm_adsp_alg_region *alg_region,
 				  unsigned int offset, unsigned int len,
 				  const char *subname, unsigned int subname_len,
-				  unsigned int flags, unsigned int type)
+				  unsigned int flags)
 {
 	struct wm_coeff_ctl *ctl;
 	struct wmfw_ctl_work *ctl_work;
 	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	const char *region_name;
+	char *region_name;
 	int ret;
 
-	region_name = wm_adsp_mem_region_name(alg_region->type);
-	if (!region_name) {
+	if (flags & WMFW_CTL_FLAG_SYS)
+		return 0;
+
+	switch (alg_region->type) {
+	case WMFW_ADSP1_PM:
+		region_name = "PM";
+		break;
+	case WMFW_ADSP1_DM:
+		region_name = "DM";
+		break;
+	case WMFW_ADSP2_XM:
+		region_name = "XM";
+		break;
+	case WMFW_ADSP2_YM:
+		region_name = "YM";
+		break;
+	case WMFW_ADSP1_ZM:
+		region_name = "ZM";
+		break;
+	default:
 		adsp_err(dsp, "Unknown region type: %d\n", alg_region->type);
 		return -EINVAL;
 	}
@@ -1374,7 +1206,6 @@ static int wm_adsp_create_control(struct wm_adsp *dsp,
 	ctl->dsp = dsp;
 
 	ctl->flags = flags;
-	ctl->type = type;
 	ctl->offset = offset;
 	ctl->len = len;
 	ctl->cache = kzalloc(ctl->len, GFP_KERNEL);
@@ -1385,13 +1216,10 @@ static int wm_adsp_create_control(struct wm_adsp *dsp,
 
 	list_add(&ctl->list, &dsp->ctl_list);
 
-	if (flags & WMFW_CTL_FLAG_SYS)
-		return 0;
-
 	ctl_work = kzalloc(sizeof(*ctl_work), GFP_KERNEL);
 	if (!ctl_work) {
 		ret = -ENOMEM;
-		goto err_list_del;
+		goto err_ctl_cache;
 	}
 
 	ctl_work->dsp = dsp;
@@ -1401,8 +1229,7 @@ static int wm_adsp_create_control(struct wm_adsp *dsp,
 
 	return 0;
 
-err_list_del:
-	list_del(&ctl->list);
+err_ctl_cache:
 	kfree(ctl->cache);
 err_ctl_name:
 	kfree(ctl->name);
@@ -1548,21 +1375,6 @@ static inline void wm_coeff_parse_coeff(struct wm_adsp *dsp, const u8 **data,
 	adsp_dbg(dsp, "\tALSA control len: %#x\n", blk->len);
 }
 
-static int wm_adsp_check_coeff_flags(struct wm_adsp *dsp,
-				const struct wm_coeff_parsed_coeff *coeff_blk,
-				unsigned int f_required,
-				unsigned int f_illegal)
-{
-	if ((coeff_blk->flags & f_illegal) ||
-	    ((coeff_blk->flags & f_required) != f_required)) {
-		adsp_err(dsp, "Illegal flags 0x%x for control type 0x%x\n",
-			 coeff_blk->flags, coeff_blk->ctl_type);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 static int wm_adsp_parse_coeff(struct wm_adsp *dsp,
 			       const struct wmfw_region *region)
 {
@@ -1579,28 +1391,6 @@ static int wm_adsp_parse_coeff(struct wm_adsp *dsp,
 		switch (coeff_blk.ctl_type) {
 		case SNDRV_CTL_ELEM_TYPE_BYTES:
 			break;
-		case WMFW_CTL_TYPE_ACKED:
-			if (coeff_blk.flags & WMFW_CTL_FLAG_SYS)
-				continue;	/* ignore */
-
-			ret = wm_adsp_check_coeff_flags(dsp, &coeff_blk,
-						WMFW_CTL_FLAG_VOLATILE |
-						WMFW_CTL_FLAG_WRITEABLE |
-						WMFW_CTL_FLAG_READABLE,
-						0);
-			if (ret)
-				return -EINVAL;
-			break;
-		case WMFW_CTL_TYPE_HOSTEVENT:
-			ret = wm_adsp_check_coeff_flags(dsp, &coeff_blk,
-						WMFW_CTL_FLAG_SYS |
-						WMFW_CTL_FLAG_VOLATILE |
-						WMFW_CTL_FLAG_WRITEABLE |
-						WMFW_CTL_FLAG_READABLE,
-						0);
-			if (ret)
-				return -EINVAL;
-			break;
 		default:
 			adsp_err(dsp, "Unknown control type: %d\n",
 				 coeff_blk.ctl_type);
@@ -1615,8 +1405,7 @@ static int wm_adsp_parse_coeff(struct wm_adsp *dsp,
 					     coeff_blk.len,
 					     coeff_blk.name,
 					     coeff_blk.name_len,
-					     coeff_blk.flags,
-					     coeff_blk.ctl_type);
+					     coeff_blk.flags);
 		if (ret < 0)
 			adsp_err(dsp, "Failed to create control: %.*s, %d\n",
 				 coeff_blk.name_len, coeff_blk.name, ret);
@@ -1638,7 +1427,7 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 	const struct wmfw_region *region;
 	const struct wm_adsp_region *mem;
 	const char *region_name;
-	char *file, *text = NULL;
+	char *file, *text;
 	struct wm_adsp_buf *buf;
 	unsigned int reg;
 	int regions = 0;
@@ -1648,11 +1437,17 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 	if (file == NULL)
 		return -ENOMEM;
 
-	snprintf(file, PAGE_SIZE, "%s-dsp%d-%s.wmfw", dsp->part, dsp->num,
-		 wm_adsp_fw[dsp->fw].file);
+	if (dsp->wmfw_file)
+		memcpy(file, dsp->wmfw_file, PAGE_SIZE);
+	else
+		snprintf(file, PAGE_SIZE, "%s-dsp%d-%s.wmfw",
+			 dsp->part, dsp->num,
+			 wm_adsp_fw[dsp->fw].file);
 	file[PAGE_SIZE - 1] = '\0';
 
+	mutex_lock(dsp->fw_lock);
 	ret = request_firmware(&firmware, file, dsp->dev);
+	mutex_unlock(dsp->fw_lock);
 	if (ret != 0) {
 		adsp_err(dsp, "Failed to request '%s'\n", file);
 		goto out;
@@ -1738,7 +1533,7 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 		 le64_to_cpu(footer->timestamp));
 
 	while (pos < firmware->size &&
-	       sizeof(*region) < firmware->size - pos) {
+	       pos - firmware->size > sizeof(*region)) {
 		region = (void *)&(firmware->data[pos]);
 		region_name = "Unknown";
 		reg = 0;
@@ -1769,11 +1564,23 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 			reg = offset;
 			break;
 		case WMFW_ADSP1_PM:
+			region_name = "PM";
+			reg = wm_adsp_region_to_reg(mem, offset);
+			break;
 		case WMFW_ADSP1_DM:
+			region_name = "DM";
+			reg = wm_adsp_region_to_reg(mem, offset);
+			break;
 		case WMFW_ADSP2_XM:
+			region_name = "XM";
+			reg = wm_adsp_region_to_reg(mem, offset);
+			break;
 		case WMFW_ADSP2_YM:
+			region_name = "YM";
+			reg = wm_adsp_region_to_reg(mem, offset);
+			break;
 		case WMFW_ADSP1_ZM:
-			region_name = wm_adsp_mem_region_name(type);
+			region_name = "ZM";
 			reg = wm_adsp_region_to_reg(mem, offset);
 			break;
 		default:
@@ -1787,42 +1594,45 @@ static int wm_adsp_load(struct wm_adsp *dsp)
 			 regions, le32_to_cpu(region->len), offset,
 			 region_name);
 
-		if (le32_to_cpu(region->len) >
-		    firmware->size - pos - sizeof(*region)) {
-			adsp_err(dsp,
-				 "%s.%d: %s region len %d bytes exceeds file length %zu\n",
-				 file, regions, region_name,
-				 le32_to_cpu(region->len), firmware->size);
-			ret = -EINVAL;
-			goto out_fw;
-		}
-
 		if (text) {
 			memcpy(text, region->data, le32_to_cpu(region->len));
 			adsp_info(dsp, "%s: %s\n", file, text);
 			kfree(text);
-			text = NULL;
 		}
 
 		if (reg) {
-			buf = wm_adsp_buf_alloc(region->data,
-						le32_to_cpu(region->len),
-						&buf_list);
-			if (!buf) {
-				adsp_err(dsp, "Out of memory\n");
-				ret = -ENOMEM;
-				goto out_fw;
-			}
+			size_t to_write = PAGE_SIZE;
+			size_t remain = le32_to_cpu(region->len);
+			const u8 *data = region->data;
 
-			ret = regmap_raw_write_async(regmap, reg, buf->buf,
-						     le32_to_cpu(region->len));
-			if (ret != 0) {
-				adsp_err(dsp,
-					"%s.%d: Failed to write %d bytes at %d in %s: %d\n",
-					file, regions,
-					le32_to_cpu(region->len), offset,
-					region_name, ret);
-				goto out_fw;
+			while (remain > 0) {
+				if (remain < PAGE_SIZE)
+					to_write = remain;
+
+				buf = wm_adsp_buf_alloc(data,
+							to_write,
+							&buf_list);
+				if (!buf) {
+					adsp_err(dsp, "Out of memory\n");
+					ret = -ENOMEM;
+					goto out_fw;
+				}
+
+				ret = regmap_raw_write_async(regmap, reg,
+							     buf->buf,
+							     to_write);
+				if (ret != 0) {
+					adsp_err(dsp,
+						"%s.%d: Failed to write %zd bytes at %d in %s: %d\n",
+						file, regions,
+						to_write, offset,
+						region_name, ret);
+					goto out_fw;
+				}
+
+				data += to_write;
+				reg += to_write / 2;
+				remain -= to_write;
 			}
 		}
 
@@ -1846,7 +1656,6 @@ out_fw:
 	regmap_async_complete(regmap);
 	wm_adsp_buf_free(&buf_list);
 	release_firmware(firmware);
-	kfree(text);
 out:
 	kfree(file);
 
@@ -1893,7 +1702,7 @@ static void *wm_adsp_read_algs(struct wm_adsp *dsp, size_t n_algs,
 	}
 
 	if (be32_to_cpu(val) != 0xbedead)
-		adsp_warn(dsp, "Algorithm list end %x 0x%x != 0xbedead\n",
+		adsp_warn(dsp, "Algorithm list end %x 0x%x != 0xbeadead\n",
 			  pos + len, be32_to_cpu(val));
 
 	alg = kzalloc(len * 2, GFP_KERNEL | GFP_DMA);
@@ -2028,8 +1837,7 @@ static int wm_adsp1_setup_algs(struct wm_adsp *dsp)
 				len -= be32_to_cpu(adsp1_alg[i].dm);
 				len *= 4;
 				wm_adsp_create_control(dsp, alg_region, 0,
-						     len, NULL, 0, 0,
-						     SNDRV_CTL_ELEM_TYPE_BYTES);
+						       len, NULL, 0, 0);
 			} else {
 				adsp_warn(dsp, "Missing length info for region DM with ID %x\n",
 					  be32_to_cpu(adsp1_alg[i].alg.id));
@@ -2049,8 +1857,7 @@ static int wm_adsp1_setup_algs(struct wm_adsp *dsp)
 				len -= be32_to_cpu(adsp1_alg[i].zm);
 				len *= 4;
 				wm_adsp_create_control(dsp, alg_region, 0,
-						     len, NULL, 0, 0,
-						     SNDRV_CTL_ELEM_TYPE_BYTES);
+						       len, NULL, 0, 0);
 			} else {
 				adsp_warn(dsp, "Missing length info for region ZM with ID %x\n",
 					  be32_to_cpu(adsp1_alg[i].alg.id));
@@ -2141,8 +1948,7 @@ static int wm_adsp2_setup_algs(struct wm_adsp *dsp)
 				len -= be32_to_cpu(adsp2_alg[i].xm);
 				len *= 4;
 				wm_adsp_create_control(dsp, alg_region, 0,
-						     len, NULL, 0, 0,
-						     SNDRV_CTL_ELEM_TYPE_BYTES);
+						       len, NULL, 0, 0);
 			} else {
 				adsp_warn(dsp, "Missing length info for region XM with ID %x\n",
 					  be32_to_cpu(adsp2_alg[i].alg.id));
@@ -2162,8 +1968,7 @@ static int wm_adsp2_setup_algs(struct wm_adsp *dsp)
 				len -= be32_to_cpu(adsp2_alg[i].ym);
 				len *= 4;
 				wm_adsp_create_control(dsp, alg_region, 0,
-						     len, NULL, 0, 0,
-						     SNDRV_CTL_ELEM_TYPE_BYTES);
+						       len, NULL, 0, 0);
 			} else {
 				adsp_warn(dsp, "Missing length info for region YM with ID %x\n",
 					  be32_to_cpu(adsp2_alg[i].alg.id));
@@ -2183,8 +1988,7 @@ static int wm_adsp2_setup_algs(struct wm_adsp *dsp)
 				len -= be32_to_cpu(adsp2_alg[i].zm);
 				len *= 4;
 				wm_adsp_create_control(dsp, alg_region, 0,
-						     len, NULL, 0, 0,
-						     SNDRV_CTL_ELEM_TYPE_BYTES);
+						       len, NULL, 0, 0);
 			} else {
 				adsp_warn(dsp, "Missing length info for region ZM with ID %x\n",
 					  be32_to_cpu(adsp2_alg[i].alg.id));
@@ -2215,11 +2019,17 @@ static int wm_adsp_load_coeff(struct wm_adsp *dsp)
 	if (file == NULL)
 		return -ENOMEM;
 
-	snprintf(file, PAGE_SIZE, "%s-dsp%d-%s.bin", dsp->part, dsp->num,
-		 wm_adsp_fw[dsp->fw].file);
+	if (dsp->bin_file)
+		memcpy(file, dsp->bin_file, PAGE_SIZE);
+	else
+		snprintf(file, PAGE_SIZE, "%s-dsp%d-%s.bin",
+			 dsp->part, dsp->num,
+			 wm_adsp_fw[dsp->fw].file);
 	file[PAGE_SIZE - 1] = '\0';
 
+	mutex_lock(dsp->fw_lock);
 	ret = request_firmware(&firmware, file, dsp->dev);
+	mutex_unlock(dsp->fw_lock);
 	if (ret != 0) {
 		adsp_warn(dsp, "Failed to request '%s'\n", file);
 		ret = 0;
@@ -2258,7 +2068,7 @@ static int wm_adsp_load_coeff(struct wm_adsp *dsp)
 
 	blocks = 0;
 	while (pos < firmware->size &&
-	       sizeof(*blk) < firmware->size - pos) {
+	       pos - firmware->size > sizeof(*blk)) {
 		blk = (void *)(&firmware->data[pos]);
 
 		type = le16_to_cpu(blk->type);
@@ -2332,17 +2142,6 @@ static int wm_adsp_load_coeff(struct wm_adsp *dsp)
 		}
 
 		if (reg) {
-			if (le32_to_cpu(blk->len) >
-			    firmware->size - pos - sizeof(*blk)) {
-				adsp_err(dsp,
-					 "%s.%d: %s region len %d bytes exceeds file length %zu\n",
-					 file, blocks, region_name,
-					 le32_to_cpu(blk->len),
-					 firmware->size);
-				ret = -EINVAL;
-				goto out_fw;
-			}
-
 			buf = wm_adsp_buf_alloc(blk->data,
 						le32_to_cpu(blk->len),
 						&buf_list);
@@ -2408,7 +2207,7 @@ int wm_adsp1_event(struct snd_soc_dapm_widget *w,
 	int ret;
 	unsigned int val;
 
-	dsp->codec = codec;
+	dsp->card = codec->component.card;
 
 	mutex_lock(&dsp->pwr_lock);
 
@@ -2463,20 +2262,13 @@ int wm_adsp1_event(struct snd_soc_dapm_widget *w,
 		if (ret != 0)
 			goto err_ena;
 
-		dsp->booted = true;
-
 		/* Start the core running */
 		regmap_update_bits(dsp->regmap, dsp->base + ADSP1_CONTROL_30,
 				   ADSP1_CORE_ENA | ADSP1_START,
 				   ADSP1_CORE_ENA | ADSP1_START);
-
-		dsp->running = true;
 		break;
 
 	case SND_SOC_DAPM_PRE_PMD:
-		dsp->running = false;
-		dsp->booted = false;
-
 		/* Halt the core */
 		regmap_update_bits(dsp->regmap, dsp->base + ADSP1_CONTROL_30,
 				   ADSP1_CORE_ENA | ADSP1_START, 0);
@@ -2512,6 +2304,17 @@ err_mutex:
 }
 EXPORT_SYMBOL_GPL(wm_adsp1_event);
 
+int wm_adsp_compr_channel(struct wm_adsp_compr *compr)
+{
+	int i;
+	struct wm_adsp *dsp = compr->dsp;
+
+	for (i = 0; i < WM_ADSP_MAX_CHANNEL_PER_DSP; i++)
+		if (dsp->compr[i] == compr)
+			return i;
+	return 0;
+}
+
 static int wm_adsp2_ena(struct wm_adsp *dsp)
 {
 	unsigned int val;
@@ -2520,33 +2323,39 @@ static int wm_adsp2_ena(struct wm_adsp *dsp)
 	switch (dsp->rev) {
 	case 0:
 		ret = regmap_update_bits_async(dsp->regmap,
-					       dsp->base + ADSP2_CONTROL,
-					       ADSP2_SYS_ENA, ADSP2_SYS_ENA);
+						dsp->base + ADSP2_CONTROL,
+						ADSP2_SYS_ENA, ADSP2_SYS_ENA);
 		if (ret != 0)
 			return ret;
+
+		/* Wait for the RAM to start, should be near instantaneous */
+		for (count = 0; count < 10; ++count) {
+			ret = regmap_read(dsp->regmap,
+					  dsp->base + ADSP2_STATUS1, &val);
+			if (ret != 0)
+				return ret;
+
+			if (val & ADSP2_RAM_RDY)
+				break;
+
+			usleep_range(1000, 1010);
+		}
+
+		if (!(val & ADSP2_RAM_RDY)) {
+			adsp_err(dsp, "Failed to start DSP RAM\n");
+			return -EBUSY;
+		}
+		adsp_dbg(dsp, "RAM ready after %d polls\n", count);
 		break;
 	default:
-		break;
-	}
+		ret = regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
+				 ADSP2_MEM_ENA, ADSP2_MEM_ENA);
 
-	/* Wait for the RAM to start, should be near instantaneous */
-	for (count = 0; count < 10; ++count) {
-		ret = regmap_read(dsp->regmap, dsp->base + ADSP2_STATUS1, &val);
 		if (ret != 0)
 			return ret;
 
-		if (val & ADSP2_RAM_RDY)
-			break;
-
-		usleep_range(250, 500);
+		break;
 	}
-
-	if (!(val & ADSP2_RAM_RDY)) {
-		adsp_err(dsp, "Failed to start DSP RAM\n");
-		return -EBUSY;
-	}
-
-	adsp_dbg(dsp, "RAM ready after %d polls\n", count);
 
 	return 0;
 }
@@ -2560,14 +2369,9 @@ static void wm_adsp2_boot_work(struct work_struct *work)
 
 	mutex_lock(&dsp->pwr_lock);
 
-	ret = regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
-				 ADSP2_MEM_ENA, ADSP2_MEM_ENA);
-	if (ret != 0)
-		goto err_mutex;
-
 	ret = wm_adsp2_ena(dsp);
 	if (ret != 0)
-		goto err_mem;
+		goto err_mutex;
 
 	ret = wm_adsp_load(dsp);
 	if (ret != 0)
@@ -2586,19 +2390,12 @@ static void wm_adsp2_boot_work(struct work_struct *work)
 	if (ret != 0)
 		goto err_ena;
 
-	switch (dsp->rev) {
-	case 0:
-		/* Turn DSP back off until we are ready to run */
-		ret = regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
-					 ADSP2_SYS_ENA, 0);
-		if (ret != 0)
-			goto err_ena;
-		break;
-	default:
-		break;
-	}
+	/* Sync set controls */
+	ret = wm_coeff_sync_controls(dsp);
+	if (ret != 0)
+		goto err_ena;
 
-	dsp->booted = true;
+	dsp->running = true;
 
 	mutex_unlock(&dsp->pwr_lock);
 
@@ -2607,9 +2404,6 @@ static void wm_adsp2_boot_work(struct work_struct *work)
 err_ena:
 	regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
 			   ADSP2_SYS_ENA | ADSP2_CORE_ENA | ADSP2_START, 0);
-err_mem:
-	regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
-			   ADSP2_MEM_ENA, 0);
 err_mutex:
 	mutex_unlock(&dsp->pwr_lock);
 }
@@ -2620,10 +2414,10 @@ static void wm_adsp2_set_dspclk(struct wm_adsp *dsp, unsigned int freq)
 
 	switch (dsp->rev) {
 	case 0:
-		ret = regmap_update_bits_async(dsp->regmap,
-					       dsp->base + ADSP2_CLOCKING,
-					       ADSP2_CLK_SEL_MASK,
-					       freq << ADSP2_CLK_SEL_SHIFT);
+		ret = regmap_update_bits(dsp->regmap,
+					 dsp->base + ADSP2_CLOCKING,
+					 ADSP2_CLK_SEL_MASK,
+					 freq << ADSP2_CLK_SEL_SHIFT);
 		if (ret) {
 			adsp_err(dsp, "Failed to set clock rate: %d\n", ret);
 			return;
@@ -2635,44 +2429,31 @@ static void wm_adsp2_set_dspclk(struct wm_adsp *dsp, unsigned int freq)
 	}
 }
 
-int wm_adsp2_preloader_get(struct snd_kcontrol *kcontrol,
-			   struct snd_ctl_elem_value *ucontrol)
+int wm_adsp2_early_event(struct snd_soc_dapm_widget *w,
+			 struct snd_kcontrol *kcontrol, int event,
+			 unsigned int freq)
 {
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct wm_adsp *dsps = snd_soc_codec_get_drvdata(codec);
+	struct wm_adsp *dsp = &dsps[w->shift];
 
-	ucontrol->value.integer.value[0] = dsp->preloaded;
+	dsp->card = codec->component.card;
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		wm_adsp2_set_dspclk(dsp, freq);
+
+		queue_work(system_unbound_wq, &dsp->boot_work);
+		break;
+	default:
+		break;
+	}
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(wm_adsp2_preloader_get);
+EXPORT_SYMBOL_GPL(wm_adsp2_early_event);
 
-int wm_adsp2_preloader_put(struct snd_kcontrol *kcontrol,
-			   struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	struct wm_adsp *dsp = snd_soc_codec_get_drvdata(codec);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	char preload[32];
-
-	snprintf(preload, ARRAY_SIZE(preload), "DSP%u Preload", mc->shift);
-
-	dsp->preloaded = ucontrol->value.integer.value[0];
-
-	if (ucontrol->value.integer.value[0])
-		snd_soc_dapm_force_enable_pin(dapm, preload);
-	else
-		snd_soc_dapm_disable_pin(dapm, preload);
-
-	snd_soc_dapm_sync(dapm);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(wm_adsp2_preloader_put);
-
-static void wm_adsp_stop_watchdog(struct wm_adsp *dsp)
+static inline void wm_adsp_stop_watchdog(struct wm_adsp *dsp)
 {
 	switch (dsp->rev) {
 	case 0:
@@ -2684,77 +2465,21 @@ static void wm_adsp_stop_watchdog(struct wm_adsp *dsp)
 	}
 }
 
-int wm_adsp2_early_event(struct snd_soc_dapm_widget *w,
-			 struct snd_kcontrol *kcontrol, int event,
-			 unsigned int freq)
-{
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
-	struct wm_adsp *dsps = snd_soc_codec_get_drvdata(codec);
-	struct wm_adsp *dsp = &dsps[w->shift];
-	struct wm_coeff_ctl *ctl;
-
-	switch (event) {
-	case SND_SOC_DAPM_PRE_PMU:
-		wm_adsp2_set_dspclk(dsp, freq);
-		queue_work(system_unbound_wq, &dsp->boot_work);
-		break;
-	case SND_SOC_DAPM_PRE_PMD:
-		mutex_lock(&dsp->pwr_lock);
-
-		wm_adsp_debugfs_clear(dsp);
-
-		dsp->fw_id = 0;
-		dsp->fw_id_version = 0;
-
-		dsp->booted = false;
-
-		regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
-				   ADSP2_MEM_ENA, 0);
-
-		list_for_each_entry(ctl, &dsp->ctl_list, list)
-			ctl->enabled = 0;
-
-		wm_adsp_free_alg_regions(dsp);
-
-		mutex_unlock(&dsp->pwr_lock);
-
-		adsp_dbg(dsp, "Shutdown complete\n");
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(wm_adsp2_early_event);
-
 int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 		   struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
 	struct wm_adsp *dsps = snd_soc_codec_get_drvdata(codec);
 	struct wm_adsp *dsp = &dsps[w->shift];
+	struct wm_coeff_ctl *ctl;
 	int ret;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		flush_work(&dsp->boot_work);
 
-		mutex_lock(&dsp->pwr_lock);
-
-		if (!dsp->booted) {
-			ret = -EIO;
-			goto err;
-		}
-
-		ret = wm_adsp2_ena(dsp);
-		if (ret != 0)
-			goto err;
-
-		/* Sync set controls */
-		ret = wm_coeff_sync_controls(dsp);
-		if (ret != 0)
-			goto err;
+		if (!dsp->running)
+			return -EIO;
 
 		wm_adsp2_lock(dsp, dsp->lock_regions);
 
@@ -2765,24 +2490,16 @@ int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 		if (ret != 0)
 			goto err;
 
-		if (wm_adsp_fw[dsp->fw].num_caps != 0) {
-			ret = wm_adsp_buffer_init(dsp);
-			if (ret < 0)
-				goto err;
-		}
+		mutex_lock(&dsp->pwr_lock);
 
-		dsp->running = true;
+		if (wm_adsp_fw[dsp->fw].num_caps != 0)
+			ret = wm_adsp_buffer_init(dsp);
 
 		mutex_unlock(&dsp->pwr_lock);
 
 		break;
 
 	case SND_SOC_DAPM_PRE_PMD:
-		/* Tell the firmware to cleanup */
-		wm_adsp_signal_event_controls(dsp, WM_ADSP_FW_EVENT_SHUTDOWN);
-
-		wm_adsp_stop_watchdog(dsp);
-
 		/* Log firmware state, it can be useful for analysis */
 		switch (dsp->rev) {
 		case 0:
@@ -2795,15 +2512,20 @@ int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 
 		mutex_lock(&dsp->pwr_lock);
 
+		wm_adsp_stop_watchdog(dsp);
+		wm_adsp_debugfs_clear(dsp);
+
+		dsp->fw_id = 0;
+		dsp->fw_id_version = 0;
 		dsp->running = false;
 
-		regmap_update_bits(dsp->regmap,
-				   dsp->base + ADSP2_CONTROL,
-				   ADSP2_CORE_ENA | ADSP2_START, 0);
-
-		/* Make sure DMAs are quiesced */
 		switch (dsp->rev) {
 		case 0:
+			regmap_update_bits(dsp->regmap,
+					   dsp->base + ADSP2_CONTROL,
+					   ADSP2_CORE_ENA | ADSP2_START, 0);
+
+			/* Make sure DMAs are quiesced */
 			regmap_write(dsp->regmap,
 				     dsp->base + ADSP2_RDMA_CONFIG_1, 0);
 			regmap_write(dsp->regmap,
@@ -2816,21 +2538,36 @@ int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 					   ADSP2_SYS_ENA, 0);
 			break;
 		default:
+			regmap_update_bits(dsp->regmap,
+					   dsp->base + ADSP2_CONTROL,
+					   ADSP2_CORE_ENA | ADSP2_START, 0);
+
+			/* Make sure DMAs are quiesced */
 			regmap_write(dsp->regmap,
 				     dsp->base + ADSP2_RDMA_CONFIG_1, 0);
 			regmap_write(dsp->regmap,
 				     dsp->base + ADSP2_WDMA_CONFIG_1, 0);
 			regmap_write(dsp->regmap,
 				     dsp->base + ADSP2V2_WDMA_CONFIG_2, 0);
+
+			regmap_update_bits(dsp->regmap,
+					   dsp->base + ADSP2_CONTROL,
+					   ADSP2_SYS_ENA | ADSP2_MEM_ENA, 0);
+
 			break;
 		}
+
+		list_for_each_entry(ctl, &dsp->ctl_list, list)
+			ctl->enabled = 0;
+
+		wm_adsp_free_alg_regions(dsp);
 
 		if (wm_adsp_fw[dsp->fw].num_caps != 0)
 			wm_adsp_buffer_free(dsp);
 
 		mutex_unlock(&dsp->pwr_lock);
 
-		adsp_dbg(dsp, "Execution stopped\n");
+		adsp_dbg(dsp, "Shutdown complete\n");
 		break;
 
 	default:
@@ -2841,22 +2578,15 @@ int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 err:
 	regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
 			   ADSP2_SYS_ENA | ADSP2_CORE_ENA | ADSP2_START, 0);
-	mutex_unlock(&dsp->pwr_lock);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(wm_adsp2_event);
 
 int wm_adsp2_codec_probe(struct wm_adsp *dsp, struct snd_soc_codec *codec)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
-	char preload[32];
-
-	snprintf(preload, ARRAY_SIZE(preload), "DSP%d Preload", dsp->num);
-	snd_soc_dapm_disable_pin(dapm, preload);
+	dsp->codec = codec;
 
 	wm_adsp2_init_debugfs(dsp, codec);
-
-	dsp->codec = codec;
 
 	return snd_soc_add_codec_controls(codec,
 					  &wm_adsp_fw_controls[dsp->num - 1],
@@ -2872,16 +2602,93 @@ int wm_adsp2_codec_remove(struct wm_adsp *dsp, struct snd_soc_codec *codec)
 }
 EXPORT_SYMBOL_GPL(wm_adsp2_codec_remove);
 
-int wm_adsp2_init(struct wm_adsp *dsp)
+#ifdef CONFIG_OF
+
+static int wm_adsp_of_parse_firmware(struct wm_adsp *dsp,
+				     struct device_node *np)
+{
+	struct device_node *fws = of_get_child_by_name(np, "firmware");
+	struct device_node *fw = NULL;
+	int ret;
+	int i;
+
+	if (!fws)
+		return 0;
+
+	i = 0;
+	while ((fw = of_get_next_child(fws, fw)) != NULL) {
+
+		ret = of_property_read_string(fw, "wlf,wmfw-file",
+					      &dsp->wmfw_file);
+		if (ret < 0) {
+			adsp_err(dsp,
+				 "Firmware filename missing/malformed: %d\n",
+				 ret);
+			return ret;
+		}
+
+		ret = of_property_read_string(fw, "wlf,bin-file",
+					      &dsp->bin_file);
+		if (ret < 0)
+			adsp_err(dsp,
+				 "Adsp bin file name missing/malformed: %d\n",
+				 ret);
+
+		adsp_info(dsp,
+			  "DSP FW name %s,Bin file name: %s\n",
+			  dsp->wmfw_file, dsp->bin_file);
+		i++;
+	}
+
+	return 0;
+}
+
+static int wm_adsp_of_parse_adsp(struct wm_adsp *dsp)
+{
+	struct device_node *np = of_get_child_by_name(dsp->dev->of_node,
+						      "adsps");
+	struct device_node *core = NULL;
+	unsigned int addr;
+	int ret;
+
+	if (!np)
+		return 0;
+
+	while ((core = of_get_next_child(np, core)) != NULL) {
+		ret = of_property_read_u32(core, "reg", &addr);
+		if (ret < 0) {
+			adsp_err(dsp,
+				 "Failed to get ADSP base address: %d\n",
+				 ret);
+			return ret;
+		}
+
+		if (addr == dsp->base)
+			break;
+	}
+
+	if (!core)
+		return 0;
+
+	return wm_adsp_of_parse_firmware(dsp, core);
+}
+
+#else
+static inline int wm_adsp_of_parse_adsp(struct wm_adsp *dsp)
+{
+	return 0;
+}
+#endif
+int wm_adsp2_init(struct wm_adsp *dsp, struct mutex *fw_lock)
 {
 	int ret;
 
 	switch (dsp->rev) {
 	case 0:
 		/*
-		 * Disable the DSP memory by default when in reset for a small
-		 * power saving.
-		 */
+		* Disable the DSP memory by default when in reset for a small
+		* power saving.
+		*/
 		ret = regmap_update_bits(dsp->regmap, dsp->base + ADSP2_CONTROL,
 					 ADSP2_MEM_ENA, 0);
 		if (ret) {
@@ -2899,6 +2706,11 @@ int wm_adsp2_init(struct wm_adsp *dsp)
 	INIT_WORK(&dsp->boot_work, wm_adsp2_boot_work);
 
 	mutex_init(&dsp->pwr_lock);
+
+	dsp->fw_lock = fw_lock;
+
+	if (dsp->dev->of_node)
+		wm_adsp_of_parse_adsp(dsp);
 
 	return 0;
 }
@@ -2924,14 +2736,15 @@ static inline int wm_adsp_compr_attached(struct wm_adsp_compr *compr)
 
 static int wm_adsp_compr_attach(struct wm_adsp_compr *compr)
 {
+	int channel = wm_adsp_compr_channel(compr);
 	/*
 	 * Note this will be more complex once each DSP can support multiple
 	 * streams
 	 */
-	if (!compr->dsp->buffer)
+	if (!compr->dsp->buffer[channel])
 		return -EINVAL;
 
-	compr->buf = compr->dsp->buffer;
+	compr->buf = compr->dsp->buffer[channel];
 	compr->buf->compr = compr;
 
 	return 0;
@@ -2952,7 +2765,9 @@ static void wm_adsp_compr_detach(struct wm_adsp_compr *compr)
 	}
 }
 
-int wm_adsp_compr_open(struct wm_adsp *dsp, struct snd_compr_stream *stream)
+int wm_adsp_compr_open(struct wm_adsp *dsp,
+		       struct snd_compr_stream *stream,
+		       int channel)
 {
 	struct wm_adsp_compr *compr;
 	int ret = 0;
@@ -2971,7 +2786,7 @@ int wm_adsp_compr_open(struct wm_adsp *dsp, struct snd_compr_stream *stream)
 		goto out;
 	}
 
-	if (dsp->compr) {
+	if (dsp->compr[channel]) {
 		/* It is expect this limitation will be removed in future */
 		adsp_err(dsp, "Only a single stream supported per DSP\n");
 		ret = -EBUSY;
@@ -2987,7 +2802,7 @@ int wm_adsp_compr_open(struct wm_adsp *dsp, struct snd_compr_stream *stream)
 	compr->dsp = dsp;
 	compr->stream = stream;
 
-	dsp->compr = compr;
+	dsp->compr[channel] = compr;
 
 	stream->runtime->private_data = compr;
 
@@ -3002,11 +2817,13 @@ int wm_adsp_compr_free(struct snd_compr_stream *stream)
 {
 	struct wm_adsp_compr *compr = stream->runtime->private_data;
 	struct wm_adsp *dsp = compr->dsp;
+	int channel;
 
 	mutex_lock(&dsp->pwr_lock);
 
 	wm_adsp_compr_detach(compr);
-	dsp->compr = NULL;
+	channel = wm_adsp_compr_channel(compr);
+	dsp->compr[channel] = NULL;
 
 	kfree(compr->raw_buf);
 	kfree(compr);
@@ -3188,7 +3005,7 @@ static int wm_adsp_buffer_locate(struct wm_adsp_compr_buf *buf)
 	struct wm_adsp_alg_region *alg_region;
 	struct wm_adsp *dsp = buf->dsp;
 	u32 xmalg, addr, magic;
-	int i, ret;
+	int i, ret, two_bufs = 0;
 
 	alg_region = wm_adsp_find_alg_region(dsp, WMFW_ADSP2_XM, dsp->fw_id);
 	xmalg = sizeof(struct wm_adsp_system_config_xm_hdr) / sizeof(__be32);
@@ -3198,10 +3015,23 @@ static int wm_adsp_buffer_locate(struct wm_adsp_compr_buf *buf)
 	if (ret < 0)
 		return ret;
 
+	/* Hack for Moto FW to support 2 buffers */
+	if (magic == WM_ADSP_ALG_XM2_STRUCT_MAGIC) {
+		xmalg++;
+		addr = alg_region->base + xmalg + ALG_XM_FIELD(magic);
+		ret = wm_adsp_read_data_word(dsp, WMFW_ADSP2_XM, addr, &magic);
+		if (ret < 0)
+			return ret;
+		two_bufs = 1;
+	}
+
 	if (magic != WM_ADSP_ALG_XM_STRUCT_MAGIC)
 		return -EINVAL;
 
 	addr = alg_region->base + xmalg + ALG_XM_FIELD(host_buf_ptr);
+	/* move for 7 words for second buffer */
+	if (buf->num)
+		addr += 7;
 	for (i = 0; i < 5; ++i) {
 		ret = wm_adsp_read_data_word(dsp, WMFW_ADSP2_XM, addr,
 					     &buf->host_buf_ptr);
@@ -3217,9 +3047,10 @@ static int wm_adsp_buffer_locate(struct wm_adsp_compr_buf *buf)
 	if (!buf->host_buf_ptr)
 		return -EIO;
 
-	adsp_dbg(dsp, "host_buf_ptr=%x\n", buf->host_buf_ptr);
+	adsp_dbg(dsp, "buffer #%d host_buf_ptr=%x\n",
+		 buf->num, buf->host_buf_ptr);
 
-	return 0;
+	return two_bufs;
 }
 
 static int wm_adsp_buffer_populate(struct wm_adsp_compr_buf *buf)
@@ -3248,8 +3079,8 @@ static int wm_adsp_buffer_populate(struct wm_adsp_compr_buf *buf)
 		region->cumulative_size = offset;
 
 		adsp_dbg(buf->dsp,
-			 "region=%d type=%d base=%04x off=%04x size=%04x\n",
-			 i, region->mem_type, region->base_addr,
+			 "buffer #%d region=%d type=%d base=%04x off=%04x size=%04x\n",
+			 buf->num, i, region->mem_type, region->base_addr,
 			 region->offset, region->cumulative_size);
 	}
 
@@ -3260,6 +3091,7 @@ static int wm_adsp_buffer_init(struct wm_adsp *dsp)
 {
 	struct wm_adsp_compr_buf *buf;
 	int ret;
+	int two_bufs = 0;
 
 	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
 	if (!buf)
@@ -3268,12 +3100,16 @@ static int wm_adsp_buffer_init(struct wm_adsp *dsp)
 	buf->dsp = dsp;
 	buf->read_index = -1;
 	buf->irq_count = 0xFFFFFFFF;
+	buf->num = 0;
 
 	ret = wm_adsp_buffer_locate(buf);
 	if (ret < 0) {
 		adsp_err(dsp, "Failed to acquire host buffer: %d\n", ret);
 		goto err_buffer;
 	}
+
+	if (ret == 1)
+		two_bufs = 1;
 
 	buf->regions = kcalloc(wm_adsp_fw[dsp->fw].caps->num_regions,
 			       sizeof(*buf->regions), GFP_KERNEL);
@@ -3288,10 +3124,53 @@ static int wm_adsp_buffer_init(struct wm_adsp *dsp)
 		goto err_regions;
 	}
 
-	dsp->buffer = buf;
+	dsp->buffer[0] = buf;
+	dsp->buf_num++;
 
+	if (!two_bufs)
+		return 0;
+
+	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+	if (!buf) {
+		ret = -ENOMEM;
+		goto err_clean1;
+	}
+
+	buf->dsp = dsp;
+	buf->read_index = -1;
+	buf->irq_count = 0xFFFFFFFF;
+	buf->num = 1;
+
+	ret = wm_adsp_buffer_locate(buf);
+	if (ret < 0) {
+		adsp_err(dsp, "Failed to acquire host buffer: %d\n", ret);
+		goto err_buffer2;
+	}
+
+	buf->regions = kcalloc(wm_adsp_fw[dsp->fw].caps->num_regions,
+			       sizeof(*buf->regions), GFP_KERNEL);
+	if (!buf->regions) {
+		ret = -ENOMEM;
+		goto err_buffer2;
+	}
+
+	ret = wm_adsp_buffer_populate(buf);
+	if (ret < 0) {
+		adsp_err(dsp, "Failed to populate host buffer: %d\n", ret);
+		goto err_regions2;
+	}
+	dsp->buffer[1] = buf;
+	dsp->buf_num++;
 	return 0;
-
+err_regions2:
+	kfree(buf->regions);
+err_buffer2:
+	kfree(buf);
+err_clean1:
+	kfree(dsp->buffer[0]->regions);
+	kfree(dsp->buffer[0]);
+	dsp->buffer[0] = NULL;
+	return ret;
 err_regions:
 	kfree(buf->regions);
 err_buffer:
@@ -3301,15 +3180,19 @@ err_buffer:
 
 static int wm_adsp_buffer_free(struct wm_adsp *dsp)
 {
-	if (dsp->buffer) {
-		wm_adsp_compr_detach(dsp->buffer->compr);
+	int i;
 
-		kfree(dsp->buffer->regions);
-		kfree(dsp->buffer);
+	for (i = 0; i < dsp->buf_num; i++) {
+		if (dsp->buffer[i]) {
+			wm_adsp_compr_detach(dsp->buffer[i]->compr);
 
-		dsp->buffer = NULL;
+			kfree(dsp->buffer[i]->regions);
+			kfree(dsp->buffer[i]);
+
+			dsp->buffer[i] = NULL;
+		}
 	}
-
+	dsp->buf_num = 0;
 	return 0;
 }
 
@@ -3334,6 +3217,8 @@ int wm_adsp_compr_trigger(struct snd_compr_stream *stream, int cmd)
 				 ret);
 			break;
 		}
+
+		compr->buf->avail = 0;
 
 		/* Trigger the IRQ at one fragment of data */
 		ret = wm_adsp_buffer_write(compr->buf,
@@ -3371,6 +3256,11 @@ static int wm_adsp_buffer_update_avail(struct wm_adsp_compr_buf *buf)
 	int write_index, read_index, avail;
 	int ret;
 
+#if IS_ENABLED(CONFIG_SND_SOC_AOV_TRIGGER)
+	/* Always read read_index in Moto AOV solution */
+	buf->read_index = -1;
+#endif
+
 	/* Only sync read index if we haven't already read a valid index */
 	if (buf->read_index < 0) {
 		ret = wm_adsp_buffer_read(buf,
@@ -3395,6 +3285,9 @@ static int wm_adsp_buffer_update_avail(struct wm_adsp_compr_buf *buf)
 		return ret;
 
 	write_index = sign_extend32(next_write_index, 23);
+
+	/* Don't empty the buffer as it kills the firmware */
+	write_index--;
 
 	avail = write_index - buf->read_index;
 	if (avail < 0)
@@ -3425,7 +3318,7 @@ static int wm_adsp_buffer_get_error(struct wm_adsp_compr_buf *buf)
 	return 0;
 }
 
-int wm_adsp_compr_handle_irq(struct wm_adsp *dsp)
+int wm_adsp_compr_handle_irq(struct wm_adsp *dsp, int channel)
 {
 	struct wm_adsp_compr_buf *buf;
 	struct wm_adsp_compr *compr;
@@ -3433,8 +3326,8 @@ int wm_adsp_compr_handle_irq(struct wm_adsp *dsp)
 
 	mutex_lock(&dsp->pwr_lock);
 
-	buf = dsp->buffer;
-	compr = dsp->compr;
+	buf = dsp->buffer[channel];
+	compr = dsp->compr[channel];
 
 	if (!buf) {
 		ret = -ENODEV;
@@ -3500,10 +3393,17 @@ int wm_adsp_compr_pointer(struct snd_compr_stream *stream,
 
 	mutex_lock(&dsp->pwr_lock);
 
+	tstamp->copied_total = compr->copied_total;
+	tstamp->sampling_rate = compr->sample_rate;
+
 	buf = compr->buf;
 
-	if (!compr->buf || compr->buf->error) {
-		snd_compr_stop_error(stream, SNDRV_PCM_STATE_XRUN);
+	if (!compr->buf) {
+		ret = -ENXIO;
+		goto out;
+	}
+
+	if (compr->buf->error) {
 		ret = -EIO;
 		goto out;
 	}
@@ -3521,12 +3421,8 @@ int wm_adsp_compr_pointer(struct snd_compr_stream *stream,
 		 */
 		if (buf->avail < wm_adsp_compr_frag_words(compr)) {
 			ret = wm_adsp_buffer_get_error(buf);
-			if (ret < 0) {
-				if (compr->buf->error)
-					snd_compr_stop_error(stream,
-							SNDRV_PCM_STATE_XRUN);
+			if (ret < 0)
 				goto out;
-			}
 
 			ret = wm_adsp_buffer_reenable_irq(buf);
 			if (ret < 0) {
@@ -3538,12 +3434,15 @@ int wm_adsp_compr_pointer(struct snd_compr_stream *stream,
 		}
 	}
 
-	tstamp->copied_total = compr->copied_total;
 	tstamp->copied_total += buf->avail * WM_ADSP_DATA_WORD_SIZE;
-	tstamp->sampling_rate = compr->sample_rate;
 
 out:
 	mutex_unlock(&dsp->pwr_lock);
+
+	/* On error get user-space to issue a read so it can detect the error */
+	if (ret < 0)
+		tstamp->copied_total += wm_adsp_compr_frag_words(compr) *
+					WM_ADSP_DATA_WORD_SIZE;
 
 	return ret;
 }
@@ -3621,10 +3520,11 @@ static int wm_adsp_compr_read(struct wm_adsp_compr *compr,
 
 	adsp_dbg(dsp, "Requested read of %zu bytes\n", count);
 
-	if (!compr->buf || compr->buf->error) {
-		snd_compr_stop_error(compr->stream, SNDRV_PCM_STATE_XRUN);
+	if (!compr->buf)
+		return -ENXIO;
+
+	if (compr->buf->error)
 		return -EIO;
-	}
 
 	count /= WM_ADSP_DATA_WORD_SIZE;
 
@@ -3711,13 +3611,11 @@ irqreturn_t wm_adsp2_bus_error(struct wm_adsp *dsp)
 	struct regmap *regmap = dsp->regmap;
 	int ret = 0;
 
-	mutex_lock(&dsp->pwr_lock);
-
 	ret = regmap_read(regmap, dsp->base + ADSP2_LOCK_REGION_CTRL, &val);
 	if (ret) {
 		adsp_err(dsp,
 			"Failed to read Region Lock Ctrl register: %d\n", ret);
-		goto error;
+		goto exit;
 	}
 
 	if (val & ADSP2_WDT_TIMEOUT_STS_MASK) {
@@ -3731,29 +3629,30 @@ irqreturn_t wm_adsp2_bus_error(struct wm_adsp *dsp)
 		else
 			adsp_err(dsp, "bus error: region lock error\n");
 
-		ret = regmap_read(regmap, dsp->base + ADSP2_BUS_ERR_ADDR, &val);
+		ret = regmap_read(regmap, dsp->base + ADSP2_BUS_ERR_ADDR,
+				  &val);
 		if (ret) {
 			adsp_err(dsp,
-				 "Failed to read Bus Err Addr register: %d\n",
-				 ret);
-			goto error;
+				"Failed to read Bus Err Addr register: %d\n",
+				ret);
+			goto exit;
 		}
 
 		adsp_err(dsp, "bus error address = 0x%x\n",
-			 val & ADSP2_BUS_ERR_ADDR_MASK);
+			(val & ADSP2_BUS_ERR_ADDR_MASK));
 
 		ret = regmap_read(regmap,
 				  dsp->base + ADSP2_PMEM_ERR_ADDR_XMEM_ERR_ADDR,
 				  &val);
 		if (ret) {
 			adsp_err(dsp,
-				 "Failed to read Pmem Xmem Err Addr register: %d\n",
+				"Failed to read Pmem Xmem Err Addr register: %d\n",
 				 ret);
-			goto error;
+			goto exit;
 		}
 
 		adsp_err(dsp, "xmem error address = 0x%x\n",
-			 val & ADSP2_XMEM_ERR_ADDR_MASK);
+			 (val & ADSP2_XMEM_ERR_ADDR_MASK));
 		adsp_err(dsp, "pmem error address = 0x%x\n",
 			 (val & ADSP2_PMEM_ERR_ADDR_MASK) >>
 			 ADSP2_PMEM_ERR_ADDR_SHIFT);
@@ -3761,10 +3660,7 @@ irqreturn_t wm_adsp2_bus_error(struct wm_adsp *dsp)
 
 	regmap_update_bits(regmap, dsp->base + ADSP2_LOCK_REGION_CTRL,
 			   ADSP2_CTRL_ERR_EINT, ADSP2_CTRL_ERR_EINT);
-
-error:
-	mutex_unlock(&dsp->pwr_lock);
-
+exit:
 	return IRQ_HANDLED;
 }
 EXPORT_SYMBOL_GPL(wm_adsp2_bus_error);
