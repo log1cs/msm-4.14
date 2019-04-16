@@ -12,6 +12,7 @@
 
 #include "trinket-moto-common-overlay.dtsi"
 #include "doha-panel.dtsi"
+#include "trinket-doha-audio-overlay.dtsi"
 
 &usb_qmp_phy {
 	status = "disabled";
@@ -29,3 +30,4 @@
 		label = "charging";
 	};
 };
+
