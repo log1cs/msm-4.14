@@ -4179,6 +4179,10 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 		if (!rc && !val.intval)
 			return 0;
 
+                typec_mode = smblib_get_prop_typec_mode(chg);
+                if (typec_rp_med_high(chg, typec_mode))
+                        return 0;
+
 		if (chg->dcin_uusb_over_gpio_en &&
 			gpio_is_valid(chg->dc_9v_gpio) &&
 			gpio_get_value(chg->dc_9v_gpio))
