@@ -4184,6 +4184,10 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 			gpio_get_value(chg->dc_9v_gpio))
 			usb_current = DCP_CURRENT_UA;
 
+		typec_mode = smblib_get_prop_typec_mode(chg);
+		if (typec_rp_med_high(chg, typec_mode))
+			return 0;
+
 		/* if flash is active force 500mA */
 		if ((usb_current < SDP_CURRENT_UA) && is_flash_active(chg))
 			usb_current = SDP_CURRENT_UA;
