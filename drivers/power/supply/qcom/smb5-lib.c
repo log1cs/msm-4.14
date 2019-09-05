@@ -4186,19 +4186,34 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 		if (!rc && !val.intval)
 			return 0;
 
-                if (usb_current == -ETIMEDOUT &&
-                    !chg->typec_apsd_rerun_done) {
-                        rc = vote(chg->usb_icl_votable, USB_PSY_VOTER,
-                                                        false, 0);
-                        if (rc < 0)
-                                return rc;
-                        rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
-                                                        false, 0);
-                        if (rc < 0)
-                                return rc;
-                        smblib_rerun_apsd_if_required(chg);
-                        return 0;
-                }
+		if (usb_current == -ETIMEDOUT &&
+		    !chg->typec_apsd_rerun_done) {
+			rc = vote(chg->usb_icl_votable, USB_PSY_VOTER,
+							false, 0);
+			if (rc < 0)
+				return rc;
+			rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
+							true, SDP_CURRENT_UA);
+			if (rc < 0)
+				return rc;
+			pr_warn("Rerun apsd for USB timeout\n");
+			smblib_rerun_apsd_if_required(chg);
+			return 0;
+		} else if (usb_current == -ETIMEDOUT) {
+			/*
+			 * Set USB_PYH 500mA ICL after rerun apsd complete
+			 * if USB still timeout.
+			 */
+			if (is_client_vote_enabled(chg->usb_icl_votable,
+							USB_PSY_VOTER)) {
+				vote(chg->usb_icl_votable, USB_PSY_VOTER,
+							true, SDP_CURRENT_UA);
+				vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
+							false, 0);
+				pr_warn("Set ICL to 500mA for USB timeout\n");
+			}
+			return 0;
+		}
 
                 typec_mode = smblib_get_prop_typec_mode(chg);
                 if (typec_rp_med_high(chg, typec_mode))
