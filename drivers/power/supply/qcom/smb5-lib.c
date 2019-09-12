@@ -4186,38 +4186,12 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 		if (!rc && !val.intval)
 			return 0;
 
-		if (usb_current == -ETIMEDOUT &&
-		    !chg->typec_apsd_rerun_done) {
-			rc = vote(chg->usb_icl_votable, USB_PSY_VOTER,
-							false, 0);
-			if (rc < 0)
-				return rc;
-			rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
-							true, SDP_CURRENT_UA);
-			if (rc < 0)
-				return rc;
-			pr_warn("Rerun apsd for USB timeout\n");
-			smblib_rerun_apsd_if_required(chg);
-			return 0;
-		} else if (usb_current == -ETIMEDOUT) {
-			/*
-			 * Set USB_PYH 500mA ICL after rerun apsd complete
-			 * if USB still timeout.
-			 */
-			if (is_client_vote_enabled(chg->usb_icl_votable,
-							USB_PSY_VOTER)) {
-				vote(chg->usb_icl_votable, USB_PSY_VOTER,
-							true, SDP_CURRENT_UA);
-				vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
-							false, 0);
-				pr_warn("Set ICL to 500mA for USB timeout\n");
-			}
+		typec_mode = smblib_get_prop_typec_mode(chg);
+		if (typec_rp_med_high(chg, typec_mode)) {
+			vote(chg->usb_icl_votable, USB_PSY_VOTER,
+ 							false, 0);
 			return 0;
 		}
-
-                typec_mode = smblib_get_prop_typec_mode(chg);
-                if (typec_rp_med_high(chg, typec_mode))
-                        return 0;
 
 		if (chg->dcin_uusb_over_gpio_en &&
 			gpio_is_valid(chg->dc_9v_gpio) &&
@@ -5549,62 +5523,30 @@ static void update_sw_icl_max(struct smb_charger *chg, int pst)
 	if (typec_rp_med_high(chg, typec_mode)) {
 		rp_ua = get_rp_based_dcp_current(chg, typec_mode);
 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, rp_ua);
+		vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
 		return;
 	}
 
 	/* rp-std or legacy, USB BC 1.2 */
 	switch (pst) {
 	case POWER_SUPPLY_TYPE_USB:
-		/*
-		 * USB_PSY will vote to increase the current to 500/900mA once
-		 * enumeration is done.
-		 */
-		if (!is_client_vote_enabled(chg->usb_icl_votable,
-						USB_PSY_VOTER)) {
-			/* Set current for DC_IN or uUSB based on flash
-			 * active.
-			 */
-			if (chg->dcin_uusb_over_gpio_en &&
-				gpio_is_valid(chg->dc_9v_gpio) &&
-				gpio_get_value(chg->dc_9v_gpio))
-				vote(chg->usb_icl_votable, GPIO_DCIN_VOTER,
-					true, is_flash_active(chg) ?
-						SDP_CURRENT_UA :
-						DCP_CURRENT_UA);
-			else
-				/* if flash is active force 500mA */
-				vote(chg->usb_icl_votable, USB_PSY_VOTER, true,
-						is_flash_active(chg) ?
-						SDP_CURRENT_UA : SDP_100_MA);
-		}
+		vote(chg->usb_icl_votable, USB_PSY_VOTER, true,
+					SDP_CURRENT_UA);
 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
 		break;
 	case POWER_SUPPLY_TYPE_USB_CDP:
 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
 					CDP_CURRENT_UA);
+		vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
 		break;
 	case POWER_SUPPLY_TYPE_USB_DCP:
 		rp_ua = get_rp_based_dcp_current(chg, typec_mode);
 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, rp_ua);
+		vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
 		break;
 	case POWER_SUPPLY_TYPE_USB_FLOAT:
-		/*
-		 * If DC_IN or uUSB is detected then vote
-		 * for DCP current.
-		 */
-		if (chg->dcin_uusb_over_gpio_en &&
-			gpio_is_valid(chg->dc_9v_gpio) &&
-			gpio_get_value(chg->dc_9v_gpio))
-			vote(chg->usb_icl_votable, GPIO_DCIN_VOTER,
-				true, DCP_CURRENT_UA);
-		else
-			/*
-			 * limit ICL to 100mA, the USB driver will
-			 * enumerate to check if this is a SDP and
-			 * appropriately set the current.
-			 */
-			vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
-					true, SDP_100_MA);
+		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
+					SDP_CURRENT_UA);
 		break;
 	case POWER_SUPPLY_TYPE_UNKNOWN:
 	default:
@@ -5680,6 +5622,26 @@ irqreturn_t usb_source_change_irq_handler(int irq, void *data)
 		chg->uusb_apsd_rerun_done = true;
 		smblib_rerun_apsd_if_required(chg);
 		return IRQ_HANDLED;
+	}
+
+	if ((chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC)
+		&& (stat & APSD_DTC_STATUS_DONE_BIT)
+		&& !chg->typec_apsd_rerun_done) {
+		const struct apsd_result *apsd_result =
+					smblib_update_usb_type(chg);
+		/*
+		 * Force re-run APSD to handle slow insertion related
+		 * charger-mis-detection.
+		 */
+		if (apsd_result->bit == SDP_CHARGER_BIT ||
+		    apsd_result->bit == OCP_CHARGER_BIT ||
+		    apsd_result->bit == FLOAT_CHARGER_BIT) {
+			smblib_dbg(chg, PR_INTERRUPT, "IRQ: rerun apsd for %s\n",
+				   apsd_result->name);
+			chg->typec_apsd_rerun_done = true;
+			smblib_rerun_apsd_if_required(chg);
+			return IRQ_HANDLED;
+		}
 	}
 
 	smblib_handle_apsd_done(chg,
