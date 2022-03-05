@@ -1,10 +1,28 @@
-KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
+focaltech_0flash_mmi-y += focaltech_core.o
+focaltech_0flash_mmi-y += focaltech_esdcheck.o
+focaltech_0flash_mmi-y += focaltech_ex_fun.o
+focaltech_0flash_mmi-y += focaltech_ex_mode.o
+focaltech_0flash_mmi-y += focaltech_flash.o
+focaltech_0flash_mmi-y += focaltech_gesture.o
+focaltech_0flash_mmi-y += focaltech_point_report_check.o
 
-all:
-	$(MAKE) -C $(KERNEL_SRC) M=$(shell pwd) modules $(KBUILD_OPTIONS)
+focaltech_0flash_mmi-$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8719) += focaltech_flash_ft8719.o
+focaltech_0flash_mmi-$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8719) += focaltech_spi_v1_1.o
 
-modules_install:
-	$(MAKE) INSTALL_MOD_STRIP=1 -C $(KERNEL_SRC) M=$(shell pwd) modules_install
+focaltech_0flash_mmi-$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8756) += focaltech_flash_ft8756.o
+focaltech_0flash_mmi-$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8756) += focaltech_spi_v1_1_1.o
 
-clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) clean
+focaltech_0flash_mmi-$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8009) += focaltech_flash_ft8756.o
+focaltech_0flash_mmi-$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8009) += focaltech_spi_v1_1_1.o
+
+ifneq ($(filter m y,$(CONFIG_TOUCHSCREEN_FTS_0FLASH_MMI_ENABLE_DOUBLE_TAP)),)
+	ccflags-y += -DFOCALTECH_SENSOR_EN
+endif
+ifneq ($(filter m y,$(CONFIG_TOUCHSCREEN_FTS_0FLASH_MMI_ENABLE_PALM)),)
+	ccflags-y += -DFOCALTECH_PALM_SENSOR_EN
+endif
+ifneq ($(filter m y,$(CONFIG_INPUT_FOCALTECH_0FLASH_MMI_PEN_NOTIFIER)),)
+	ccflags-y += -DFOCALTECH_PEN_NOTIFIER
+endif
+
+obj-$(CONFIG_TOUCHSCREEN_FTS_0FLASH_MMI) += focaltech_0flash_mmi.o
