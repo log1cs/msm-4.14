@@ -73,6 +73,7 @@ enum pon_restart_reason {
 	PON_RESTART_REASON_OEM_P		= 0x51,
 	PON_RESTART_REASON_OEM_MAX		= 0x5f,
 	PON_RESTART_REASON_XFL			= 0x60,
+	PON_RESTART_REASON_FACTORY		= 0x07,	/* Extend */
 };
 #else
 enum pon_restart_reason {

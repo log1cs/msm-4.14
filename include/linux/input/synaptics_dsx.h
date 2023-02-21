@@ -1,9 +1,8 @@
 /*
  * Synaptics DSX touchscreen driver
  *
- * Copyright (C) 2012-2016 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2012-2015 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
  *
@@ -107,6 +106,10 @@ struct synaptics_dsx_board_data {
 	unsigned int addr_delay_us;
 	const char *pwr_reg_name;
 	const char *bus_reg_name;
+	//SW8-DH-Double_Tap-00+[
+	const char *ibb_reg_name;
+	const char *lab_reg_name;
+	//SW8-DH-Double_Tap-00+]
 	struct synaptics_dsx_button_map *cap_button_map;
 	struct synaptics_dsx_button_map *vir_button_map;
 };
