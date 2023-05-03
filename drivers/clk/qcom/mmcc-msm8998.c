@@ -1611,7 +1611,6 @@ static struct clk_branch mmss_snoc_dvm_axi_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data) {
 			.name = "mmss_snoc_dvm_axi_clk",
-			.flags = CLK_ENABLE_HAND_OFF,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -3036,7 +3035,7 @@ static struct clk_branch mmss_mnoc_ahb_clk = {
 				"ahb_clk_src",
 			},
 			.num_parents = 1,
-			.flags = CLK_ENABLE_HAND_OFF | CLK_SET_RATE_PARENT,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -3091,7 +3090,7 @@ static struct clk_branch mmss_mnoc_maxi_clk = {
 				"maxi_clk_src",
 			},
 			.num_parents = 1,
-			.flags = CLK_ENABLE_HAND_OFF | CLK_SET_RATE_PARENT,
+			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
 		},
 	},
@@ -3207,7 +3206,6 @@ static struct clk_branch mmss_vmem_ahb_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data) {
 			.name = "mmss_vmem_ahb_clk",
-			.flags = CLK_ENABLE_HAND_OFF,
 			.ops = &clk_branch2_ops,
 		},
 	},
