@@ -230,6 +230,14 @@ struct qpnp_pon {
 	ktime_t			kpdpwr_last_release_time;
 };
 
+#ifdef CONFIG_FIH_APR
+struct fih_pon {
+	struct qpnp_pon         *pon[3];
+};
+
+static struct fih_pon savedpon;
+#endif
+
 static int pon_ship_mode_en;
 module_param_named(
 	ship_mode_en, pon_ship_mode_en, int, 0600
@@ -1700,6 +1708,7 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon,
 			return rc;
 	}
 
+	dev_set_name(pon->dev, "qpnp-power-on");
 	device_init_wakeup(pon->dev, true);
 
 	return 0;
@@ -1972,10 +1981,13 @@ static int qpnp_pon_read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 {
 	unsigned int buf[2], reg;
 	int rc;
+	char logs[80], str[40];
 
 	rc = qpnp_pon_read(pon, QPNP_PON_OFF_REASON(pon), &reg);
 	if (rc)
 		return rc;
+
+	sprintf(str, "PON_POFF_REASON = 0x%x", reg);
 
 	if (reg & QPNP_GEN2_POFF_SEQ) {
 		rc = qpnp_pon_read(pon, QPNP_POFF_REASON1(pon), buf);
@@ -1983,6 +1995,7 @@ static int qpnp_pon_read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 			return rc;
 		*reason = (u8)buf[0];
 		*reason_index_offset = 0;
+		snprintf(logs, sizeof(logs), "%s, POFF_REASON1 = 0x%x\n", str, *reason);
 	} else if (reg & QPNP_GEN2_FAULT_SEQ) {
 		rc = regmap_bulk_read(pon->regmap, QPNP_FAULT_REASON1(pon), buf,
 				      2);
@@ -1993,14 +2006,17 @@ static int qpnp_pon_read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 		}
 		*reason = (u8)buf[0] | (u16)(buf[1] << 8);
 		*reason_index_offset = POFF_REASON_FAULT_OFFSET;
+		snprintf(logs, sizeof(logs), "%s, FAULT_REASON = 0x%x\n", str, *reason);
 	} else if (reg & QPNP_GEN2_S3_RESET_SEQ) {
 		rc = qpnp_pon_read(pon, QPNP_S3_RESET_REASON(pon), buf);
 		if (rc)
 			return rc;
 		*reason = (u8)buf[0];
 		*reason_index_offset = POFF_REASON_S3_RESET_OFFSET;
+		snprintf(logs, sizeof(logs), "%s, S3_RESET_REASON = 0x%x\n", str, *reason);
 	}
 
+	dev_info(pon->dev, "PMIC@SID%d: Power-off reason register: %s\n", to_spmi_device(pon->dev->parent)->usid, logs);
 	return 0;
 }
 
@@ -2375,6 +2391,12 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 	}
 #endif
 
+#ifdef CONFIG_FIH_APR
+	unsigned int index;
+	index = to_spmi_device(pon->dev->parent)->usid;
+	savedpon.pon[index] = pon;
+#endif
+
 	return 0;
 }
 
@@ -2397,6 +2419,66 @@ static int qpnp_pon_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_FIH_APR
+static void qpnp_pon_show_reason(unsigned int usid)
+{
+	struct qpnp_pon *pon;
+	unsigned int index;
+	uint pon_sts = 0;
+	u16 poff_sts = 0;
+	int reason_index_offset = 0;
+	u8 buf[2];
+
+	pon = savedpon.pon[usid];
+	if (pon==NULL)
+		return;
+	regmap_read(pon->regmap, QPNP_PON_REASON1(pon), &pon_sts);
+	if (!is_pon_gen1(pon) && pon->subtype != PON_1REG) {
+		qpnp_pon_read_gen2_pon_off_reason(pon, &poff_sts,
+						&reason_index_offset);
+	} else {
+		regmap_bulk_read(pon->regmap, QPNP_POFF_REASON1(pon),
+			buf, 2);
+		poff_sts = buf[0] | (buf[1] << 8);
+	}
+
+	index = ffs(pon_sts) - 1;
+	if (index >= ARRAY_SIZE(qpnp_pon_reason) || index < 0) {
+		dev_info(pon->dev,
+			"PMIC@SID%d Power-on reason: Unknown and '%s' boot\n",
+			to_spmi_device(pon->dev->parent)->usid,
+			 cold_boot ? "cold" : "warm");
+	} else {
+		dev_info(pon->dev,
+			"PMIC@SID%d Power-on reason: %s and '%s' boot\n",
+			to_spmi_device(pon->dev->parent)->usid,
+			 qpnp_pon_reason[index],
+			cold_boot ? "cold" : "warm");
+	}
+
+	index = ffs(poff_sts) - 1 + reason_index_offset;
+	if (index >= ARRAY_SIZE(qpnp_poff_reason) || index < 0) {
+		dev_info(pon->dev,
+				"PMIC@SID%d: Unknown power-off reason\n",
+				to_spmi_device(pon->dev->parent)->usid);
+	} else {
+		dev_info(pon->dev,
+				"PMIC@SID%d: Power-off reason: %s\n",
+				to_spmi_device(pon->dev->parent)->usid,
+				qpnp_poff_reason[index]);
+	}
+}
+
+void qpnp_pon_dump_reason(void)
+{
+	int i;
+
+	for (i = 0; i < 3; i++) {
+		qpnp_pon_show_reason(i);
+	}
+}
+#endif
+
 static const struct of_device_id qpnp_pon_match_table[] = {
 	{ .compatible = "qcom,qpnp-power-on" },
 	{}
@@ -2413,6 +2495,9 @@ static struct platform_driver qpnp_pon_driver = {
 
 static int __init qpnp_pon_init(void)
 {
+#ifdef CONFIG_FIH_APR
+	memset(&savedpon, 0, sizeof(savedpon));
+#endif
 	return platform_driver_register(&qpnp_pon_driver);
 }
 subsys_initcall(qpnp_pon_init);
