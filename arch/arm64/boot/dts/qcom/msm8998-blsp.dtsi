@@ -456,7 +456,7 @@
 		clock-names = "iface_clk", "core_clk";
 		clocks = <&clock_gcc GCC_BLSP1_AHB_CLK>,
 			 <&clock_gcc GCC_BLSP1_QUP5_SPI_APPS_CLK>;
-		status = "disabled";
+		status = "okay";
 	};
 
 	spi_6: spi@c17a000 { /* BLSP1 QUP6 */

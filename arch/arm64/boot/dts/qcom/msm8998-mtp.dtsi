@@ -211,7 +211,7 @@
 };
 
 &i2c_5 {
-	status = "okay";
+	status = "disabled";
 	synaptics@20 {
 		compatible = "synaptics,dsx";
 		reg = <0x20>;
@@ -391,6 +391,10 @@
 
 &mem_client_3_size {
 	qcom,peripheral-size = <0x500000>;
+};
+
+&spi_5 {
+        status = "okay";
 };
 
 &pmi8998_haptics {
