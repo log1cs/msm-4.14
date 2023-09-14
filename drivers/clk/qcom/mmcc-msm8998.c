@@ -1234,6 +1234,7 @@ static struct freq_tbl ftbl_mclk_clk_src[] = {
 	F(   9600000,	P_BI_TCXO,         2,    0,     0),
 	F(  16666667,   P_GPLL0_DIV,  2,    1,     9),
 	F(  19200000,	P_BI_TCXO,         1,    0,     0),
+	F(  23076923,   P_GPLL0_DIV,  1,    2,    26),
 	F(  24000000,   P_GPLL0_DIV,  1,    2,    25),
 	F(  33333333,   P_GPLL0_DIV,  1,    1,     9),
 	F(  48000000,   P_GPLL0,      1,    2,    25),
