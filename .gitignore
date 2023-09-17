@@ -84,6 +84,8 @@ modules.builtin
 include/config
 include/generated
 arch/*/include/generated
+arch/arm64/kernel/vdso/vdso.lds
+arch/arm64/kernel/vdso32/vdso.lds
 
 # stgit generated dirs
 patches-*
