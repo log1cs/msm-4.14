@@ -687,6 +687,7 @@
 #define BTN_TRIGGER_HAPPY38		0x2e5
 #define BTN_TRIGGER_HAPPY39		0x2e6
 #define BTN_TRIGGER_HAPPY40		0x2e7
+#define KEY_AMBIENT_EVENT       	0x2f4
 
 /* Custom fingerprint gestures keys */
 #define KEY_FP_GESTURE_UP		0x2e8
