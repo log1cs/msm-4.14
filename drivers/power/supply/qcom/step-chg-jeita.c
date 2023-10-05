@@ -22,6 +22,9 @@
 
 #define STEP_CHG_VOTER		"STEP_CHG_VOTER"
 #define JEITA_VOTER		"JEITA_VOTER"
+/* -799 - Implement the WLC FCC adjust mechansim */
+#define FIH_WLC_VOTER "FIH_WLC_VOTER"
+/* -799 */
 
 #define is_between(left, right, value) \
 		(((left) >= (right) && (left) >= (value) \
@@ -33,6 +36,15 @@ struct step_chg_cfg {
 	struct step_chg_jeita_param	param;
 	struct range_data		fcc_cfg[MAX_STEP_CHG_ENTRIES];
 };
+
+/* -799 - Implement the WLC FCC adjust mechansim */
+struct wlc_fcc_cfg {
+	u32			psy_prop;
+	char			*prop_name;
+	int			hysteresis;
+	struct range_data	fcc_cfg[MAX_STEP_CHG_ENTRIES];
+};
+/* -799 */
 
 struct jeita_fcc_cfg {
 	struct step_chg_jeita_param	param;
@@ -48,6 +60,9 @@ struct step_chg_info {
 	struct device		*dev;
 	ktime_t			step_last_update_time;
 	ktime_t			jeita_last_update_time;
+	/* -799 - Implement the WLC FCC adjust mechansim */
+	ktime_t			wlc_last_update_time;
+	/* -799 */
 	bool			step_chg_enable;
 	bool			sw_jeita_enable;
 	bool			jeita_arb_en;
@@ -62,6 +77,14 @@ struct step_chg_info {
 	int			jeita_fcc_index;
 	int			jeita_fv_index;
 	int			step_index;
+	/* -1214 - Only use hysteresis when JEITA change from noraml to cool or warm */
+	int			last_jeita_status;
+	/* -1214 */
+	/* -799 - Implement the WLC FCC adjust mechansim */
+	int			wlc_fcc_index;
+	bool			fih_wlc_fcc_en;
+	/* -799 */
+
 	int			get_config_retry_count;
 
 	struct step_chg_cfg	*step_chg_config;
@@ -73,6 +96,9 @@ struct step_chg_info {
 	struct votable		*usb_icl_votable;
 	struct wakeup_source	*step_chg_ws;
 	struct power_supply	*batt_psy;
+	/* -799 - Implement the WLC FCC adjust mechansim */
+	struct power_supply	*dc_psy;
+	/* -799 */
 	struct power_supply	*bms_psy;
 	struct power_supply	*usb_psy;
 	struct power_supply	*dc_psy;

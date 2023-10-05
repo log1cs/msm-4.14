@@ -28,8 +28,8 @@ struct range_data {
 	u32 value;
 };
 
-int qcom_step_chg_init(struct device *dev,
-		bool step_chg_enable, bool sw_jeita_enable, bool jeita_arb_en);
+int qcom_step_chg_init(bool, bool, bool);
+/* end A1NO-799 */
 void qcom_step_chg_deinit(void);
 int read_range_data_from_node(struct device_node *node,
 		const char *prop_str, struct range_data *ranges,

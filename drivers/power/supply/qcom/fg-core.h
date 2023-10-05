@@ -329,6 +329,13 @@ struct fg_batt_props {
 	int		float_volt_uv;
 	int		vbatt_full_mv;
 	int		fastchg_curr_ma;
+	bool		diff_jeita_fn_en;
+	int		jeita_fcc_comp_cool;
+	int		jeita_fcc_comp_warm;
+	int		jeita_fv_comp_cool;
+	int		jeita_fv_comp_warm;
+	bool		fih_jeita_full_capacity_warm_en;
+	bool		fih_jeita_full_capacity_cool_en;
 #ifdef CONFIG_QPNP_SMBFG_NEWGEN_EXTENSION
 	int		initial_capacity;
 #endif
@@ -605,6 +612,8 @@ struct fg_dev {
 	struct delayed_work	profile_load_work;
 	struct work_struct	status_change_work;
 	struct delayed_work	sram_dump_work;
+	int			sys_pre_temp;
+	int			sys_ignore_temp_sts; // ignore temp
 };
 
 /* Debugfs data structures are below */

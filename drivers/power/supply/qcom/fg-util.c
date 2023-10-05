@@ -391,15 +391,73 @@ void fg_notify_charger(struct fg_dev *fg)
 	}
 
 	if (fg->bp.fastchg_curr_ma > 0) {
+		prop.intval = (fg->bp.diff_jeita_fn_en == true) ? 1 : 0;
+		rc = power_supply_set_property(fg->batt_psy,
+				POWER_SUPPLY_PROP_JEITA_DIFF_FN_EN,
+				&prop);
+		if (rc < 0) {
+			pr_err("Error in setting diff_jeita_fn_en property on batt_psy, rc=%d\n", rc);
+		}
+	}
+
+	if(fg->bp.diff_jeita_fn_en) {
+		prop.intval = fg->bp.jeita_fcc_comp_cool;
+		rc = power_supply_set_property(fg->batt_psy,
+				POWER_SUPPLY_PROP_JEITA_FCC_COOL, &prop);
+		if (rc < 0) {
+			pr_err("Error in setting jeita_fcc_comp_cool property on batt_psy, rc=%d\n", rc);
+		}
+
+		prop.intval = fg->bp.jeita_fcc_comp_warm;
+		rc = power_supply_set_property(fg->batt_psy,
+				POWER_SUPPLY_PROP_JEITA_FCC_WARM, &prop);
+		if (rc < 0) {
+			pr_err("Error in setting jeita_fcc_comp_warm property on batt_psy, rc=%d\n", rc);
+		}
+
+		prop.intval = fg->bp.jeita_fv_comp_cool;
+		rc = power_supply_set_property(fg->batt_psy,
+				POWER_SUPPLY_PROP_JEITA_FV_COOL, &prop);
+		if (rc < 0) {
+			pr_err("Error in setting jeita_fv_comp_cool property on batt_psy, rc=%d\n", rc);
+		}
+
+		prop.intval = fg->bp.jeita_fv_comp_warm;
+		rc = power_supply_set_property(fg->batt_psy,
+				POWER_SUPPLY_PROP_JEITA_FV_WARM, &prop);
+		if (rc < 0) {
+			pr_err("Error in setting jeita_fv_comp_warm property on batt_psy, rc=%d\n", rc);
+		}
+	}
+
+	if(fg->bp.fih_jeita_full_capacity_warm_en == true)
+		prop.intval = 1;
+	else
+		prop.intval = 0;
+	rc = power_supply_set_property(fg->batt_psy,
+			POWER_SUPPLY_PROP_JEITA_FULL_CAPACITY_WARM_EN, &prop);
+	if (rc < 0) {
+		pr_err("Error in setting fih_jeita_full_cap_warm_en property on batt_psy, rc=%d\n", rc);
+	}
+
+	if(fg->bp.fih_jeita_full_capacity_cool_en == true)
+		prop.intval = 1;
+	else
+		prop.intval = 0;
+	rc = power_supply_set_property(fg->batt_psy,
+			POWER_SUPPLY_PROP_JEITA_FULL_CAPACITY_COOL_EN, &prop);
+	if (rc < 0) {
+		pr_err("Error in setting fih_jeita_full_cap_cool_en property on batt_psy, rc=%d\n", rc);
+	}
+
+	if(fg->bp.fastchg_curr_ma >= 0) {
 		prop.intval = fg->bp.fastchg_curr_ma * 1000;
 		rc = power_supply_set_property(fg->batt_psy,
-				POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
-				&prop);
+				POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX, &prop);
 		if (rc < 0) {
 			pr_err("Error in setting constant_charge_current_max property on batt_psy, rc=%d\n",
 				rc);
 			return;
-		}
 	}
 }
 
