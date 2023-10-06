@@ -957,7 +957,6 @@ static int wdet_probe(struct platform_device *pdev)
 
 #ifdef USE_LCDSTATE
 	wdet->drm_notify.notifier_call = wdet_drm_notify;
-	ret = drm_register_client(&wdet->drm_notify);
 #else
 #ifdef CONFIG_PM_SLEEP
 	wdet->pm_notify.notifier_call = wdet_pm_notify;
@@ -987,7 +986,6 @@ static int wdet_remove(struct platform_device *pdev)
 	kfree(wdet->alarmtimer);
 #endif
 #ifdef USE_LCDSTATE
-	drm_unregister_client(&wdet->drm_notify);
 #else
 #ifdef CONFIG_PM_SLEEP
 	unregister_pm_notifier(&wdet->pm_notify);
