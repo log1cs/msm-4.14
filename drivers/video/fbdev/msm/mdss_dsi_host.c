@@ -31,6 +31,8 @@
 #include "mdss_smmu.h"
 #include "mdss_dsi_phy.h"
 
+#include "../../../fih/fih_lcm.h"
+
 #define VSYNC_PERIOD 17
 #define DMA_TX_TIMEOUT 200
 #define DMA_TPG_FIFO_LEN 64
@@ -87,6 +89,7 @@ struct mdss_dsi_event {
 static struct mdss_dsi_event dsi_event;
 
 static int dsi_event_thread(void *data);
+extern int fih_get_aod(void);
 static void dsi_send_events(struct mdss_dsi_ctrl_pdata *ctrl,
 					u32 events, u32 arg);
 
@@ -3144,6 +3147,8 @@ bool mdss_dsi_ack_err_status(struct mdss_dsi_ctrl_pdata *ctrl)
 	u32 status;
 	unsigned char *base;
 	bool ret = false;
+	static char page_cnt[32] = {0};
+	static char page_status[32] ={0};
 
 	base = ctrl->ctrl_base;
 
@@ -3166,7 +3171,17 @@ bool mdss_dsi_ack_err_status(struct mdss_dsi_ctrl_pdata *ctrl)
 			 (status & 0x1008000))
 			return false;
 
+#ifdef CONFIG_FIH_NB1
+		if(fih_get_aod() && (status & 0x1000c40))
+			return false;
+#endif
 		pr_err("%s: status=%x\n", __func__, status);
+		ctrl->err_cont.dsi_ack_err_cnt++;
+		ctrl->err_cont.dsi_ack_err_status = status;
+		sprintf(page_cnt, "0x%x\n",ctrl->err_cont.dsi_ack_err_cnt);
+		sprintf(page_status, "0x%x\n",ctrl->err_cont.dsi_ack_err_status);
+		fih_awer_cnt_set(page_cnt);
+		fih_awer_status_set(page_status);
 		ret = true;
 	}
 
