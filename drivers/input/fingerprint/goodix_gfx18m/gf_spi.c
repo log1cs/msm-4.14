@@ -32,7 +32,7 @@
 #include <linux/slab.h>
 #include <linux/compat.h>
 #include <linux/delay.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/ktime.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -419,7 +419,7 @@ static irqreturn_t gf_irq(int irq, void *handle)
 		kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
 #endif
 
-		wake_lock_timeout(&gf_dev->ttw_wl, msecs_to_jiffies(GF_TTW_HOLD_TIME));//Alan, add wakelock
+		__pm_wakeup_event(&gf_dev->ttw_wl, msecs_to_jiffies(GF_TTW_HOLD_TIME));//Alan, add wakelock
 
 	return IRQ_HANDLED;
 }
@@ -687,7 +687,7 @@ static int gf_probe(struct platform_device *pdev)
 		{
 			gf_dev->irq_enabled = 0;
 		}
-		wake_lock_init(&gf_dev->ttw_wl, WAKE_LOCK_SUSPEND, "gf_ttw_wl"); //Alan, add wakelock
+		wakeup_source_init(&gf_dev->ttw_wl, "gf_ttw_wl"); //Alan, add wakelock
 	}
 
 gf_dbg("%s gf_dev->irq_enabled =%d",__func__,gf_dev->irq_enabled);

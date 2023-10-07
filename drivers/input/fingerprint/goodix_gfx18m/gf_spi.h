@@ -3,7 +3,6 @@
 
 #include <linux/types.h>
 #include <linux/notifier.h>
-#include <linux/wakelock.h> //KC ref. from D1C: Alan, add wakelock
 
 /*KC ref. from D1C, add BBS log*/
 #define BBOX_FP_PROB_FAIL do {printk("BBox::UEC;39::0\n");} while (0);
@@ -79,7 +78,7 @@ struct gf_dev {
 	char device_available;
 	char fb_black;
 	struct regulator *pwr_reg;
-	struct wake_lock ttw_wl; //Alan, add wakelock
+	struct wakeup_source ttw_wl; //Alan, add wakelock
 	int key_customer_define; //rerfer from FihtdcCode@AlanHZ, Add for key define by customer
 };
 
