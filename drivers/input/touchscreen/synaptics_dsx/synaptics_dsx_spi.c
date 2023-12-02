@@ -1,9 +1,8 @@
 /*
  * Synaptics DSX touchscreen driver
  *
- * Copyright (C) 2012-2016 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2012-2015 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
  *
@@ -51,6 +50,9 @@ static unsigned char *buf;
 
 static struct spi_transfer *xfer;
 
+unsigned short is_spi_bus_suspend;//SW8-DH-Check_SPI_BUS-00+
+
+
 #ifdef CONFIG_OF
 static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 {
@@ -82,6 +84,19 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		bdata->bus_reg_name = NULL;
 	else
 		bdata->bus_reg_name = name;
+	//SW8-DH-Double_Tap-00+[
+	retval = of_property_read_string(np, "synaptics,ibb-reg-name", &name);
+	if (retval < 0)
+		bdata->ibb_reg_name = NULL;
+	else
+		bdata->ibb_reg_name = name;
+
+	retval = of_property_read_string(np, "synaptics,lab-reg-name", &name);
+	if (retval < 0)
+		bdata->lab_reg_name = NULL;
+	else
+		bdata->lab_reg_name = name;
+	//SW8-DH-Double_Tap-00+]
 
 	prop = of_find_property(np, "synaptics,power-gpio", NULL);
 	if (prop && prop->length) {
@@ -282,7 +297,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		bdata->vir_button_map->nbuttons = 0;
 		bdata->vir_button_map->map = NULL;
 	}
-
+	dev_info(dev, "%s: %d, bdata->reset_gpio = %d, bdata->irq_gpio = %d\n", __func__, __LINE__, bdata->reset_gpio, bdata->irq_gpio);
 	return 0;
 }
 #endif
@@ -387,7 +402,7 @@ static int synaptics_rmi4_spi_set_page(struct synaptics_rmi4_data *rmi4_data,
 }
 
 static int synaptics_rmi4_spi_read(struct synaptics_rmi4_data *rmi4_data,
-		unsigned short addr, unsigned char *data, unsigned int length)
+		unsigned short addr, unsigned char *data, unsigned short length)
 {
 	int retval;
 	unsigned int index;
@@ -397,6 +412,7 @@ static int synaptics_rmi4_spi_read(struct synaptics_rmi4_data *rmi4_data,
 	struct spi_device *spi = to_spi_device(rmi4_data->pdev->dev.parent);
 	const struct synaptics_dsx_board_data *bdata =
 			rmi4_data->hw_if->board_data;
+	int iRetry = 0;//SW8-DH-Check_SPI_BUS-00+
 
 	spi_message_init(&msg);
 
@@ -448,8 +464,16 @@ static int synaptics_rmi4_spi_read(struct synaptics_rmi4_data *rmi4_data,
 		if (bdata->block_delay_us)
 			xfer[index - 1].delay_usecs = bdata->block_delay_us;
 	}
-
 	retval = spi_sync(spi, &msg);
+	//SW8-DH-Check_SPI_BUS-00+[
+	while(retval == -EINPROGRESS && iRetry++ < 3)
+	{
+		dev_err(rmi4_data->pdev->dev.parent, "%s, %d, Retry to wait spi bus resume, iRetry = %d,\n", __func__, __LINE__, iRetry);
+		usleep_range(10000, 10000);
+		retval = spi_sync(spi, &msg);
+	}
+	//SW8-DH-Check_SPI_BUS-00+]
+
 	if (retval == 0) {
 		retval = secure_memcpy(data, length, buf, length, length);
 		if (retval < 0) {
@@ -471,7 +495,7 @@ static int synaptics_rmi4_spi_read(struct synaptics_rmi4_data *rmi4_data,
 }
 
 static int synaptics_rmi4_spi_write(struct synaptics_rmi4_data *rmi4_data,
-		unsigned short addr, unsigned char *data, unsigned int length)
+		unsigned short addr, unsigned char *data, unsigned short length)
 {
 	int retval;
 	unsigned int index;
@@ -570,6 +594,7 @@ static int synaptics_rmi4_spi_probe(struct spi_device *spi)
 {
 	int retval;
 
+	dev_info(&spi->dev, "%s %d\n", __func__, __LINE__);
 	if (spi->master->flags & SPI_MASTER_HALF_DUPLEX) {
 		dev_err(&spi->dev,
 				"%s: Full duplex not supported by host\n",
@@ -660,6 +685,34 @@ static int synaptics_rmi4_spi_remove(struct spi_device *spi)
 	return 0;
 }
 
+//SW8-DH-Double_Tap+[
+static int synaptics_spi_pm_suspend(struct device *dev)
+{
+	int ret = 0;
+
+	is_spi_bus_suspend = 1;
+	//dev_info(dev, "%s \n", __func__);
+
+	return ret;
+}
+
+static int synaptics_spi_pm_resume(struct device *dev)
+{
+	int ret = 0;
+
+	is_spi_bus_suspend = 0;
+	//dev_info(dev, "%s\n", __func__);
+
+	return ret;
+}
+
+static const struct dev_pm_ops synaptics_spi_pm_ops = {
+	.suspend = synaptics_spi_pm_suspend,
+	.resume = synaptics_spi_pm_resume,
+};
+
+//SW8-DH-Double_Tap+]
+
 static const struct spi_device_id synaptics_rmi4_id_table[] = {
 	{SPI_DRIVER_NAME, 0},
 	{},
@@ -683,6 +736,7 @@ static struct spi_driver synaptics_rmi4_spi_driver = {
 		.name = SPI_DRIVER_NAME,
 		.owner = THIS_MODULE,
 		.of_match_table = synaptics_rmi4_of_match_table,
+		.pm = &synaptics_spi_pm_ops, //SW8-DH-Double_Tap+
 	},
 	.probe = synaptics_rmi4_spi_probe,
 	.remove = synaptics_rmi4_spi_remove,

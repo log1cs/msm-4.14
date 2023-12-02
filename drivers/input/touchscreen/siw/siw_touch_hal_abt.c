@@ -2,7 +2,6 @@
  * siw_touch_hal_abt.c - SiW touch hal driver for ABT
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -40,6 +39,8 @@
 #include "siw_touch_gpio.h"
 #include "siw_touch_irq.h"
 #include "siw_touch_sys.h"
+
+extern struct net init_net;//FIH
 
 /*
  * [ABT]
@@ -308,6 +309,7 @@ struct siw_hal_abt_report_p {
 
 struct siw_hal_abt_data {
 	struct device *dev;
+	char name[128];
 	struct mutex abt_comm_lock;
 	struct mutex abt_socket_lock;
 
@@ -404,20 +406,18 @@ static inline const char *abt_conn_name(int idx)
 	return (idx < ABT_CONN_MAX) ? abt_conn_name_str[idx] : "(invalid)";
 }
 
-#define SIW_ABT_TAG 	"abt"
-
 #define t_abt_info(_abt, fmt, args...)	\
-		__t_dev_info(_abt->dev, SIW_ABT_TAG "[%d(%s)]: " fmt,	\
+		__t_dev_info(_abt->dev, "%s[%d(%s)] : " fmt, _abt->name,	\
 					_abt->abt_conn_tool, abt_conn_name(_abt->abt_conn_tool),	\
 					##args)
 
 #define t_abt_err(_abt, fmt, args...)	\
-		__t_dev_err(_abt->dev, SIW_ABT_TAG "[%d(%s)] : " fmt,	\
+		__t_dev_err(_abt->dev, "%s[%d(%s)] : " fmt, _abt->name,	\
 					_abt->abt_conn_tool, abt_conn_name(_abt->abt_conn_tool),	\
 					##args)
 
 #define t_abt_warn(_abt, fmt, args...)	\
-		__t_dev_warn(_abt->dev, SIW_ABT_TAG "[%d(%s)] : " fmt,	\
+		__t_dev_warn(_abt->dev, "%s[%d(%s)] : " fmt, _abt->name,	\
 					_abt->abt_conn_tool, abt_conn_name(_abt->abt_conn_tool),	\
 					##args)
 
@@ -556,19 +556,11 @@ static int abt_sock_sendmsg(struct siw_hal_abt_data *abt,
 			}	\
 		} while (0)
 
-static int siw_sock_create_kern(int family, int type, int protocol, struct socket **res)
-{
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
-	return sock_create_kern(&init_net, family, type, protocol, res);
-#else
-	return sock_create_kern(family, type, protocol, res);
-#endif
-}
-
 static int __used abt_sock_create_data(struct siw_hal_abt_data *abt,
 				struct socket **res)
 {
-	int ret = siw_sock_create_kern(PF_INET, SOCK_DGRAM, IPPROTO_UDP, res);
+	//int ret = sock_create_kern(PF_INET, SOCK_DGRAM, IPPROTO_UDP, res);
+	int ret = sock_create_kern(&init_net, PF_INET, SOCK_DGRAM, IPPROTO_UDP, res);
 	t_abt_log_sock_create(abt, "datagram", ret);
 	return ret;
 }
@@ -576,7 +568,8 @@ static int __used abt_sock_create_data(struct siw_hal_abt_data *abt,
 static int __used abt_sock_create_stream(struct siw_hal_abt_data *abt,
 				struct socket **res)
 {
-	int ret = siw_sock_create_kern(PF_INET, SOCK_STREAM, IPPROTO_TCP, res);
+	//int ret = sock_create_kern(PF_INET, SOCK_STREAM, IPPROTO_TCP, res);
+	int ret = sock_create_kern(&init_net, PF_INET, SOCK_STREAM, IPPROTO_TCP, res);
 	t_abt_log_sock_create(abt, "stream", ret);
 	return ret;
 }
@@ -1013,18 +1006,6 @@ out:
 	return ret;
 }
 
-static void __used abt_ksocket_free_send_socket(struct siw_hal_abt_data *abt)
-{
-	struct siw_hal_abt_comm *abt_comm = &abt->abt_comm;
-
-	abt_comm->send_connected = 0;
-	if (abt_comm->sock_send != NULL) {
-		sock_release(abt_comm->sock_send);
-		abt_comm->sock_send = NULL;
-		t_abt_info(abt, "send socket released\n");
-	}
-}
-
 static int32_t __used abt_ksocket_init_send_socket(struct siw_hal_abt_data *abt)
 {
 //	struct device *dev = abt->dev;
@@ -1032,11 +1013,7 @@ static int32_t __used abt_ksocket_init_send_socket(struct siw_hal_abt_data *abt)
 	struct socket *sock;
 	struct sockaddr_in *addr_in = &abt_comm->addr_send;
 	char *ip = (char *)abt_comm->send_ip;
-	int ret = 0;
-
-	if (abt_comm->sock_send != NULL) {
-		return 0;
-	}
+	int ret;
 
 	ret = abt_sock_create_data(abt, &sock);
 	if (ret < 0) {
@@ -1062,13 +1039,16 @@ static int32_t __used abt_ksocket_init_send_socket(struct siw_hal_abt_data *abt)
 	}
 
 	abt_comm->send_connected = 1;
-	t_abt_info(abt, "connect send socket (%s,%d)\n", ip, t_abt_port_send);
+	t_abt_dbg_base(abt, "connect send socket (%s,%d)\n", ip, t_abt_port_send);
 
 	return ret;
 
 out:
-	abt_ksocket_free_send_socket(abt);
-
+	abt_comm->send_connected = 0;
+	if (abt_comm->sock_send != NULL) {
+		sock_release(abt_comm->sock_send);
+		abt_comm->sock_send = NULL;
+	}
 	return ret;
 }
 
@@ -1165,7 +1145,11 @@ static void abt_ksocket_exit_kill(struct siw_hal_abt_data *abt)
 		t_abt_dbg_base(abt, "ts_sock released\n");
 	}
 
-	abt_ksocket_free_send_socket(abt);
+	if (abt_comm->sock_send != NULL) {
+		sock_release(abt_comm->sock_send);
+		abt_comm->sock_send = NULL;
+		t_abt_dbg_base(abt, "sock_send released\n");
+	}
 
 	abt_comm->curr_sock = NULL;
 	abt_comm->curr_addr = NULL;
@@ -1200,24 +1184,22 @@ static int32_t abt_ksocket_raw_data_send(
 	struct siw_hal_abt_comm *abt_comm = &abt->abt_comm;
 	int ret = 0;
 
-	if (abt_comm->sock_send == NULL) {
+	if (abt_comm->send_connected == 0)
 		abt_ksocket_init_send_socket(abt);
-	}
 
-	if (!abt_comm->send_connected) {
+	if (abt_comm->send_connected == 1) {
+		ret = abt_ksocket_do_send(abt,
+				abt_comm->sock_send,
+				&abt_comm->addr_send,
+				buf, len);
+	} else {
 		abt->connect_error_count++;
 		if (abt->connect_error_count > 10) {
 			t_abt_err(abt, "connection error - socket release\n");
 			abt_force_set_report_mode(abt, 0);
 			abt_ksocket_exit(abt);
 		}
-		return ret;
 	}
-
-	ret = abt_ksocket_do_send(abt,
-			abt_comm->sock_send,
-			&abt_comm->addr_send,
-			buf, len);
 
 	return ret;
 }
@@ -1618,9 +1600,6 @@ static int abt_ksocket_thread_for_pctool(void *data)
 		goto out;
 	}
 
-	abt->abt_report_point = 1;
-	abt->abt_report_ocd = 1;
-
 	abt->client_connected = 1;
 	t_abt_info(abt,
 		"TCP connected with TS (ip %s, port %d)\n",
@@ -1640,11 +1619,6 @@ out:
 				&abt_comm->ts_sock,
 				&abt_comm->ts_addr);
 
-	abt->client_connected = 0;
-
-	abt->abt_report_point = 0;
-	abt->abt_report_ocd = 0;
-
 	t_abt_info(abt, "%s terminated\n", abt_conn_name(tool));
 
 	return ret;
@@ -1655,7 +1629,7 @@ out:
 	({	\
 		struct task_struct *_thread;	\
 		t_abt_dbg_base(_abt, "Run kthread for %s\n", #_func);	\
-		_thread = kthread_run(_func, _abt, "abt-%s", dev_name(_abt->dev));	\
+		_thread = kthread_run(_func, _abt, _abt->name);	\
 		_thread;	\
 	})
 
@@ -1782,9 +1756,6 @@ static int abt_tool_do_start(struct siw_hal_abt_data *abt,
 				abt_sock_listener_t listener)
 {
 	int ret = 0;
-
-	abt->abt_report_point = 0;
-	abt->abt_report_ocd = 0;
 
 	ret = abt_ksocket_init(abt, ip, tool, listener);
 	if (ret) {
@@ -2216,7 +2187,10 @@ static struct siw_hal_abt_data *siw_hal_abt_alloc(struct device *dev)
 	}
 	abt->abt_comm.send_packet = send_packet;
 
-	t_dev_dbg_base(dev, "create abt (0x%zX)\n", (size_t)sizeof(*abt));
+	snprintf(abt->name, sizeof(abt->name)-1, "%s-abt", dev_name(dev));
+
+	t_dev_dbg_base(dev, "create abt[%s] (0x%zX)\n",
+				abt->name, (size_t)sizeof(*abt));
 
 	abt->dev = ts->dev;
 
@@ -2265,7 +2239,7 @@ static void siw_hal_abt_free(struct device *dev)
 	struct siw_hal_abt_data *abt = (struct siw_hal_abt_data *)ts->abt;
 
 	if (abt) {
-		t_dev_dbg_base(dev, "free abt\n");
+		t_dev_dbg_base(dev, "free abt[%s]\n", abt->name);
 
 		abt_store_tool_exit(abt, NULL);
 

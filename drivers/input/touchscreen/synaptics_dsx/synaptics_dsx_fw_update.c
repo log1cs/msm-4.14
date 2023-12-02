@@ -1,9 +1,8 @@
 /*
  * Synaptics DSX touchscreen driver
  *
- * Copyright (C) 2012-2016 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2012-2015 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
  *
@@ -45,23 +44,37 @@
 
 #define FW_IHEX_NAME "synaptics/startup_fw_update.bin"
 #define FW_IMAGE_NAME "synaptics/startup_fw_update.img"
+/*Win add for panel select*/
+extern int touch_panel_select;
+#define FW_IMAGE_NAME_JGR "TP_Firmware_jgr.img"
+#define FW_IMAGE_NAME_VN3 "TP_Firmware_vn3.img"
+#define FW_IMAGE_NAME_NB1 "TP_Firmware_JDI"
+
+/*Win add for panel select*/
+/*Win add for proc callback function*/
+#include <asm/uaccess.h>
+#include "../../../fih/fih_touch.h"
+extern struct fih_touch_cb touch_cb;
+int fw_upgrade_flag = -1;
+int firmware_flag = 0 ;
+extern int get_device_config_id;//SW8-DH-ConfigID-00+
+/*Win add for proc callback function*/
+/*Win modify for firmware upgrade on startup*/
+#define DO_STARTUP_FW_UPDATE
+/*Win modify for firmware upgrade on startup*/
 /*
-*#define DO_STARTUP_FW_UPDATE
+#ifdef DO_STARTUP_FW_UPDATE
+#ifdef CONFIG_FB
+#define WAIT_FOR_FB_READY
+#define FB_READY_WAIT_MS 100
+#define FB_READY_TIMEOUT_S 30
+#endif
+#endif
 */
 /*
-*#ifdef DO_STARTUP_FW_UPDATE
-*#ifdef CONFIG_FB
-*#define WAIT_FOR_FB_READY
-*#define FB_READY_WAIT_MS 100
-*#define FB_READY_TIMEOUT_S 30
-*#endif
-*#endif
-*/
-/*
-*#define MAX_WRITE_SIZE 4096
+#define MAX_WRITE_SIZE 4096
 */
 
-#define ENABLE_SYS_REFLASH false
 #define FORCE_UPDATE false
 #define DO_LOCKDOWN false
 
@@ -132,13 +145,12 @@
 
 #define INT_DISABLE_WAIT_MS 20
 #define ENTER_FLASH_PROG_WAIT_MS 20
-#define READ_CONFIG_WAIT_MS 20
+void touch_fwver_read(char *fwver);//SW8-DH-ConfigID-00+
 
 static int fwu_do_reflash(void);
 
 static int fwu_recovery_check_status(void);
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static ssize_t fwu_sysfs_show_image(struct file *data_file,
 		struct kobject *kobj, struct bin_attribute *attributes,
 		char *buf, loff_t pos, size_t count);
@@ -195,16 +207,6 @@ static ssize_t fwu_sysfs_guest_code_block_count_show(struct device *dev,
 static ssize_t fwu_sysfs_write_guest_code_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count);
 
-#ifdef SYNA_TDDI
-static ssize_t fwu_sysfs_write_lockdown_code_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count);
-
-static ssize_t fwu_sysfs_read_lockdown_code_show(struct device *dev,
-		struct device_attribute *attr, char *buf);
-#endif
-
-#endif
-
 enum f34_version {
 	F34_V0 = 0,
 	F34_V1,
@@ -236,11 +238,6 @@ enum config_area {
 	BL_CONFIG_AREA,
 	DP_CONFIG_AREA,
 	FLASH_CONFIG_AREA,
-#ifdef SYNA_TDDI
-	TDDI_FORCE_CONFIG_AREA,
-	TDDI_LCM_DATA_AREA,
-	TDDI_OEM_DATA_AREA,
-#endif
 	UPP_AREA,
 };
 
@@ -295,18 +292,7 @@ enum v5v6_flash_command {
 	CMD_V5V6_ERASE_DISP_CONFIG = 0xa,
 	CMD_V5V6_ERASE_GUEST_CODE = 0xb,
 	CMD_V5V6_WRITE_GUEST_CODE = 0xc,
-	CMD_V5V6_ERASE_CHIP = 0x0d,
 	CMD_V5V6_ENABLE_FLASH_PROG = 0xf,
-#ifdef SYNA_TDDI
-	CMD_V5V6_ERASE_FORCE_CONFIG = 0x11,
-	CMD_V5V6_READ_FORCE_CONFIG = 0x12,
-	CMD_V5V6_WRITE_FORCE_CONFIG = 0x13,
-	CMD_V5V6_ERASE_LOCKDOWN_DATA = 0x1a,
-	CMD_V5V6_READ_LOCKDOWN_DATA = 0x1b,
-	CMD_V5V6_WRITE_LOCKDOWN_DATA = 0x1c,
-	CMD_V5V6_ERASE_LCM_DATA = 0x1d,
-	CMD_V5V6_ERASE_OEM_DATA = 0x1e,
-#endif
 };
 
 enum flash_command {
@@ -328,21 +314,6 @@ enum flash_command {
 	CMD_ERASE_BOOTLOADER,
 	CMD_ERASE_UTILITY_PARAMETER,
 	CMD_ENABLE_FLASH_PROG,
-#ifdef SYNA_TDDI
-	CMD_ERASE_CHIP,
-	CMD_ERASE_FORCE_CONFIG,
-	CMD_READ_FORCE_CONFIG,
-	CMD_WRITE_FORCE_CONFIG,
-	CMD_ERASE_LOCKDOWN_DATA,
-	CMD_READ_LOCKDOWN_DATA,
-	CMD_WRITE_LOCKDOWN_DATA,
-	CMD_ERASE_LCM_DATA,
-	CMD_READ_LCM_DATA,
-	CMD_WRITE_LCM_DATA,
-	CMD_ERASE_OEM_DATA,
-	CMD_READ_OEM_DATA,
-	CMD_WRITE_OEM_DATA,
-#endif
 };
 
 enum f35_flash_command {
@@ -536,13 +507,7 @@ struct f34_v5v6_flash_properties_2 {
 	union {
 		struct {
 			unsigned char has_guest_code:1;
-			unsigned char f34_query4_b1:1;
-			unsigned char has_gesture_config:1;
-			unsigned char has_force_config:1;
-			unsigned char has_lockdown_data:1;
-			unsigned char has_lcm_data:1;
-			unsigned char has_oem_data:1;
-			unsigned char f34_query4_b7:1;
+			unsigned char reserved:7;
 		} __packed;
 		unsigned char data[1];
 	};
@@ -573,12 +538,6 @@ struct block_count {
 	unsigned short utility_param;
 	unsigned short lockdown;
 	unsigned short guest_code;
-#ifdef SYNA_TDDI
-	unsigned short tddi_force_config;
-	unsigned short tddi_lockdown_data;
-	unsigned short tddi_lcm_data;
-	unsigned short tddi_oem_data;
-#endif
 	unsigned short total_count;
 };
 
@@ -711,12 +670,6 @@ struct synaptics_rmi4_fwu_handle {
 	bool force_update;
 	bool do_lockdown;
 	bool has_guest_code;
-#ifdef SYNA_TDDI
-	bool has_force_config;
-	bool has_lockdown_data;
-	bool has_lcm_data;
-	bool has_oem_data;
-#endif
 	bool has_utility_param;
 	bool new_partition_table;
 	bool incompatible_partition_tables;
@@ -761,83 +714,218 @@ struct synaptics_rmi4_fwu_handle {
 	struct work_struct fwu_work;
 };
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static struct bin_attribute dev_attr_data = {
 	.attr = {
 		.name = "data",
-		.mode = 0664,
+		.mode = (S_IRUGO | S_IWUSR | S_IWGRP),
 	},
 	.size = 0,
 	.read = fwu_sysfs_show_image,
 	.write = fwu_sysfs_store_image,
 };
-#endif
 
 static struct device_attribute attrs[] = {
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
-	__ATTR(dorecovery, 0220,
+	__ATTR(dorecovery, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_do_recovery_store),
-	__ATTR(doreflash, 0220,
+	__ATTR(doreflash, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_do_reflash_store),
-	__ATTR(writeconfig, 0220,
+	__ATTR(writeconfig, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_write_config_store),
-	__ATTR(readconfig, 0220,
+	__ATTR(readconfig, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_read_config_store),
-	__ATTR(configarea, 0220,
+	__ATTR(configarea, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_config_area_store),
-	__ATTR(imagename, 0220,
+	__ATTR(imagename, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_image_name_store),
-	__ATTR(imagesize, 0220,
+	__ATTR(imagesize, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_image_size_store),
-	__ATTR(blocksize, 0444,
+	__ATTR(blocksize, S_IRUGO,
 			fwu_sysfs_block_size_show,
 			synaptics_rmi4_store_error),
-	__ATTR(fwblockcount, 0444,
+	__ATTR(fwblockcount, S_IRUGO,
 			fwu_sysfs_firmware_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(configblockcount, 0444,
+	__ATTR(configblockcount, S_IRUGO,
 			fwu_sysfs_configuration_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(dispconfigblockcount, 0444,
+	__ATTR(dispconfigblockcount, S_IRUGO,
 			fwu_sysfs_disp_config_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(permconfigblockcount, 0444,
+	__ATTR(permconfigblockcount, S_IRUGO,
 			fwu_sysfs_perm_config_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(blconfigblockcount, 0444,
+	__ATTR(blconfigblockcount, S_IRUGO,
 			fwu_sysfs_bl_config_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(uppblockcount, 0444,
+	__ATTR(uppblockcount, S_IRUGO,
 			fwu_sysfs_utility_parameter_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(guestcodeblockcount, 0444,
+	__ATTR(guestcodeblockcount, S_IRUGO,
 			fwu_sysfs_guest_code_block_count_show,
 			synaptics_rmi4_store_error),
-	__ATTR(writeguestcode, 0220,
+	__ATTR(writeguestcode, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			fwu_sysfs_write_guest_code_store),
-#ifdef SYNA_TDDI
-	__ATTR(lockdowncode, 0664,
-			fwu_sysfs_read_lockdown_code_show,
-			fwu_sysfs_write_lockdown_code_store),
-#endif
-#endif
 };
 
 static struct synaptics_rmi4_fwu_handle *fwu;
 
 DECLARE_COMPLETION(fwu_remove_complete);
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
-DEFINE_MUTEX(fwu_sysfs_mutex);
-#endif
+/*Win add for proc callback function*/
+void touch_fwimver_read(char *buf)
+{
+	struct file *RawdataFile = NULL;
+	char *image_data=NULL;
+	u32 address_t=0,address_v=0,fwid2=0;
+	char firmware_name[64];
+	mm_segment_t fs;
+	int value_temp=0;
+	loff_t pos = 0;
+	fs = get_fs();
+	set_fs(get_ds());
+	pr_notice("F@TOUCH %s\n", __func__);
+	if(fwu == NULL)
+	{
+		pr_info("F@TOUCH fwu is not exist");
+		return;
+	}
+	if(touch_panel_select==1)// || touch_panel_select==0)
+	{//JGR
+		strncpy(fwu->image_name, FW_IMAGE_NAME_JGR, MAX_IMAGE_NAME_LEN);
+	}
+	if(touch_panel_select==2)
+	{//VN3
+		strncpy(fwu->image_name, FW_IMAGE_NAME_VN3, MAX_IMAGE_NAME_LEN);
+	}
+	if(touch_panel_select==0)
+	{//NB1
+		strncpy(fwu->image_name, FW_IMAGE_NAME_NB1, MAX_IMAGE_NAME_LEN);
+	}
+
+	snprintf(firmware_name,sizeof(firmware_name),"/system/etc/firmware/%s",fwu->image_name);
+	pr_debug("F@TOUCH firmware Path = %s\n",firmware_name);
+	//RawdataFile = filp_open(firmware_name, O_RDONLY, (S_IRUGO | S_IWUSR) );
+	RawdataFile = filp_open(firmware_name, O_RDONLY, 0440 );
+	if(IS_ERR(RawdataFile))
+	{
+		pr_err("F@TOUCH : %s open %s failed = %ld\n", __func__,firmware_name, PTR_ERR(RawdataFile));
+		goto exit;
+	}
+	value_temp=RawdataFile->f_op->llseek(RawdataFile,0,SEEK_END);
+	pr_info("F@TOUCH firmware image_Size = %d\n",value_temp);
+	image_data = kzalloc(value_temp, GFP_KERNEL);
+	//RawdataFile->f_op->llseek(RawdataFile,0,SEEK_SET);
+	if(image_data)
+	{
+		memset(image_data, 0, value_temp);
+		//RawdataFile->f_op->read(RawdataFile, image_data, value_temp, &RawdataFile->f_pos);
+		vfs_read(RawdataFile, image_data, value_temp, &pos);
+		address_t=image_data[11]<<24 | image_data[10]<<16 | image_data[9]<<8 | image_data[8];
+		pr_debug("F@TOUCH Upgrade Touch firmware image_Size = 0x%.8X",address_t);
+
+		//address_v = address_t+0x100;
+		address_v = address_t+0x8f0;
+		fwid2 = image_data[address_v]<<24 | image_data[address_v+1]<<16 | image_data[address_v+2]<<8 | image_data[address_v+3];
+		pr_debug("F@TOUCH Upgrade Touch firmware config ID address = 0x%.8X config ID = %.8X",address_v,fwid2);
+	}
+	if(RawdataFile != NULL)
+	{
+		pr_debug("F@TOUCH : %s filp_close(RawdataFile);\n", __func__);
+		filp_close(RawdataFile,NULL);
+	}
+exit:
+	set_fs(fs);
+	sprintf(buf, "%.8X\n",fwid2);
+	return;
+}
+
+void touch_upgrade_read(char *buf)
+{
+	sprintf(buf, "%d\n",fw_upgrade_flag);
+	return;
+}
+
+void touch_upgrade_write(int flag)
+{
+	int retval;
+	unsigned int input;
+	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
+pr_info("F@TOUCH %s",__func__);
+	input = flag;
+pr_info("F@TOUCH %s input = %d\n",__func__,input);
+	if (fwu->in_ub_mode) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: In microbootloader mode\n",
+				__func__);
+		retval = -EINVAL;
+		goto exit;
+	}
+/*
+	if (!fwu->ext_data_source)
+	{pr_info("F@TOUCH %s fwu->ext_data_source 1 \n",__func__);
+		return;
+	}
+	else
+	{pr_info("F@TOUCH %s fwu->ext_data_source 2 \n",__func__);
+		fwu->image = fwu->ext_data_source;
+	}*/
+pr_info("F@TOUCH %s  1",__func__);
+	if (input & LOCKDOWN) {
+		fwu->do_lockdown = true;
+		input &= ~LOCKDOWN;
+	}
+pr_info("F@TOUCH %s  2",__func__);
+	if ((input != NORMAL) && (input != FORCE)) {
+		retval = -EINVAL;
+		goto exit;
+	}
+pr_info("F@TOUCH %s  3",__func__);
+	if (input == FORCE)
+		fwu->force_update = true;
+pr_info("F@TOUCH %s  4",__func__);
+	pr_info("F@TOUCH %s  4, %s = fwu->image",__func__, fwu->image);
+
+	retval = synaptics_fw_updater(fwu->image);
+	if (retval < 0) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Failed to do reflash\n",
+				__func__);
+		fw_upgrade_flag = 1;
+		goto exit;
+	}
+	fw_upgrade_flag = 0;
+pr_info("F@TOUCH %s  5",__func__);
+
+exit:
+	kfree(fwu->ext_data_source);
+	fwu->ext_data_source = NULL;
+	fwu->image = NULL;
+	fwu->force_update = FORCE_UPDATE;
+	fwu->do_lockdown = DO_LOCKDOWN;
+	return;
+}
+
+int touch_fwback_read(void)
+{
+	pr_info("F@TOUCH : %s\n", __func__);
+	return firmware_flag;
+}
+
+void touch_fwback_write(void)
+{
+	firmware_flag=1;
+	return;
+}
+/*Win add for proc callback function*/
+
 
 static void calculate_checksum(unsigned short *data, unsigned long len,
 		unsigned long *result)
@@ -1325,7 +1413,8 @@ static void fwu_parse_image_header_05_06(void)
 				fwu->img.ui_firmware.size;
 	}
 
-	if (fwu->img.contains_bootloader || header->options_tddi)
+	if ((fwu->img.bl_version == BL_V5 && fwu->img.contains_bootloader) ||
+			(fwu->img.bl_version == BL_V6 && header->options_tddi))
 		fwu->img.contains_disp_config = true;
 	else
 		fwu->img.contains_disp_config = false;
@@ -1419,42 +1508,30 @@ static int fwu_parse_image_info(void)
 
 static int fwu_read_flash_status(void)
 {
-	int retval = 0;
-	unsigned char *status = NULL;
-	unsigned char *command = NULL;
+	int retval;
+	unsigned char status;
+	unsigned char command;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
-	status = kcalloc(1, sizeof(char), GFP_KERNEL);
-	if (!status) {
-		retval = -ENOMEM;
-		goto exit;
-	}
-
-	command = kcalloc(1, sizeof(char), GFP_KERNEL);
-	if (!command) {
-		retval = -ENOMEM;
-		goto exit;
-	}
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			fwu->f34_fd.data_base_addr + fwu->off.flash_status,
-			status,
-			sizeof(*status));
+			&status,
+			sizeof(status));
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read flash status\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
-	fwu->in_bl_mode = *status >> 7;
+	fwu->in_bl_mode = status >> 7;
 
 	if (fwu->bl_version == BL_V5)
-		fwu->flash_status = (*status >> 4) & MASK_3BIT;
+		fwu->flash_status = (status >> 4) & MASK_3BIT;
 	else if (fwu->bl_version == BL_V6)
-		fwu->flash_status = *status & MASK_3BIT;
+		fwu->flash_status = status & MASK_3BIT;
 	else if (fwu->bl_version == BL_V7 || fwu->bl_version == BL_V8)
-		fwu->flash_status = *status & MASK_5BIT;
+		fwu->flash_status = status & MASK_5BIT;
 
 	if (fwu->write_bootloader)
 		fwu->flash_status = 0x00;
@@ -1472,28 +1549,26 @@ static int fwu_read_flash_status(void)
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			fwu->f34_fd.data_base_addr + fwu->off.flash_cmd,
-			command,
-			sizeof(*command));
+			&command,
+			sizeof(command));
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read flash command\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
 	if (fwu->bl_version == BL_V5)
-		fwu->command = *command & MASK_4BIT;
+		fwu->command = command & MASK_4BIT;
 	else if (fwu->bl_version == BL_V6)
-		fwu->command = *command & MASK_6BIT;
+		fwu->command = command & MASK_6BIT;
 	else if (fwu->bl_version == BL_V7 || fwu->bl_version == BL_V8)
-		fwu->command = *command;
+		fwu->command = command;
 
 	if (fwu->write_bootloader)
 		fwu->command = 0x00;
-exit:
-	kfree(status);
-	kfree(command);
-	return retval;
+
+	return 0;
 }
 
 static int fwu_wait_for_idle(int timeout_ms, bool poll)
@@ -1714,35 +1789,6 @@ static int fwu_write_f34_v5v6_command(unsigned char cmd)
 	case CMD_ENABLE_FLASH_PROG:
 		command = CMD_V5V6_ENABLE_FLASH_PROG;
 		break;
-#ifdef SYNA_TDDI
-	case CMD_ERASE_CHIP:
-		command = CMD_V5V6_ERASE_CHIP;
-		break;
-	case CMD_ERASE_FORCE_CONFIG:
-		command = CMD_V5V6_ERASE_FORCE_CONFIG;
-		break;
-	case CMD_READ_FORCE_CONFIG:
-		command = CMD_V5V6_READ_FORCE_CONFIG;
-		break;
-	case CMD_WRITE_FORCE_CONFIG:
-		command = CMD_V5V6_WRITE_CONFIG;
-		break;
-	case CMD_ERASE_LOCKDOWN_DATA:
-		command = CMD_V5V6_ERASE_LOCKDOWN_DATA;
-		break;
-	case CMD_READ_LOCKDOWN_DATA:
-		command = CMD_V5V6_READ_LOCKDOWN_DATA;
-		break;
-	case CMD_WRITE_LOCKDOWN_DATA:
-		command = CMD_V5V6_WRITE_LOCKDOWN_DATA;
-		break;
-	case CMD_ERASE_LCM_DATA:
-		command = CMD_V5V6_ERASE_LCM_DATA;
-		break;
-	case CMD_ERASE_OEM_DATA:
-		command = CMD_V5V6_ERASE_OEM_DATA;
-		break;
-#endif
 	default:
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Invalid command 0x%02x\n",
@@ -1755,13 +1801,6 @@ static int fwu_write_f34_v5v6_command(unsigned char cmd)
 	case CMD_ERASE_UI_CONFIG:
 	case CMD_ERASE_DISP_CONFIG:
 	case CMD_ERASE_GUEST_CODE:
-#ifdef SYNA_TDDI
-	case CMD_ERASE_CHIP:
-	case CMD_ERASE_FORCE_CONFIG:
-	case CMD_ERASE_LOCKDOWN_DATA:
-	case CMD_ERASE_LCM_DATA:
-	case CMD_ERASE_OEM_DATA:
-#endif
 	case CMD_ENABLE_FLASH_PROG:
 		retval = synaptics_rmi4_reg_write(rmi4_data,
 				data_base + fwu->off.payload,
@@ -1952,8 +1991,6 @@ static int fwu_read_f34_v7_partition_table(unsigned char *partition_table)
 		return retval;
 	}
 
-	msleep(READ_CONFIG_WAIT_MS);
-
 	retval = fwu_wait_for_idle(WRITE_WAIT_MS, true);
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
@@ -2105,35 +2142,22 @@ static int fwu_read_f34_v5v6_queries(void)
 {
 	int retval;
 	unsigned char count;
-	unsigned char base;
-	unsigned char offset;
-	unsigned char *buf = NULL;
-	struct f34_v5v6_flash_properties_2 *properties_2 = NULL;
+	unsigned char query_base;
+	unsigned char buf[10];
+	struct f34_v5v6_flash_properties_2 properties_2;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	buf = kcalloc(10, sizeof(char), GFP_KERNEL);
-	if (!buf) {
-		retval = -ENOMEM;
-		goto exit;
-	}
-
-	properties_2 = kzalloc(sizeof(*properties_2), GFP_KERNEL);
-	if (!properties_2) {
-		retval = -ENOMEM;
-		goto exit;
-	}
-
-	base = fwu->f34_fd.query_base_addr;
+	query_base = fwu->f34_fd.query_base_addr;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
-			base + V5V6_BOOTLOADER_ID_OFFSET,
+			query_base + V5V6_BOOTLOADER_ID_OFFSET,
 			fwu->bootloader_id,
 			sizeof(fwu->bootloader_id));
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read bootloader ID\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
 	if (fwu->bl_version == BL_V5) {
@@ -2153,14 +2177,14 @@ static int fwu_read_f34_v5v6_queries(void)
 	}
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
-			base + fwu->off.block_size,
+			query_base + fwu->off.block_size,
 			buf,
 			2);
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read block size info\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
 	batohs(&fwu->block_size, &(buf[0]));
@@ -2174,14 +2198,14 @@ static int fwu_read_f34_v5v6_queries(void)
 	}
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
-			base + fwu->off.properties,
+			query_base + fwu->off.properties,
 			fwu->flash_properties.data,
 			sizeof(fwu->flash_properties.data));
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read flash properties\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
 	count = 4;
@@ -2196,14 +2220,14 @@ static int fwu_read_f34_v5v6_queries(void)
 		count += 2;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
-			base + fwu->off.block_count,
+			query_base + fwu->off.block_count,
 			buf,
 			count);
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read block count info\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
 	batohs(&fwu->blkcount.ui_firmware, &(buf[0]));
@@ -2225,110 +2249,39 @@ static int fwu_read_f34_v5v6_queries(void)
 		batohs(&fwu->blkcount.dp_config, &(buf[count]));
 
 	fwu->has_guest_code = false;
-#ifdef SYNA_TDDI
-	fwu->has_force_config = false;
-	fwu->has_lockdown_data = false;
-	fwu->has_lcm_data = false;
-	fwu->has_oem_data = false;
-#endif
 
 	if (fwu->flash_properties.has_query4) {
 		retval = synaptics_rmi4_reg_read(rmi4_data,
-				base + fwu->off.properties_2,
-				properties_2->data,
-				sizeof(properties_2->data));
+				query_base + fwu->off.properties_2,
+				properties_2.data,
+				sizeof(properties_2.data));
 		if (retval < 0) {
 			dev_err(rmi4_data->pdev->dev.parent,
 					"%s: Failed to read flash properties 2\n",
 					__func__);
-			goto exit;
+			return retval;
 		}
-		offset = fwu->off.properties_2 + 1;
-		count = 0;
-		if (properties_2->has_guest_code) {
+
+		if (properties_2.has_guest_code) {
 			retval = synaptics_rmi4_reg_read(rmi4_data,
-					base + offset + count,
+					query_base + fwu->off.gc_block_count,
 					buf,
 					2);
 			if (retval < 0) {
 				dev_err(rmi4_data->pdev->dev.parent,
 						"%s: Failed to read guest code block count\n",
 						__func__);
-				goto exit;
+				return retval;
 			}
 
 			batohs(&fwu->blkcount.guest_code, &(buf[0]));
-			count++;
 			fwu->has_guest_code = true;
 		}
-#ifdef SYNA_TDDI
-		if (properties_2->has_force_config) {
-			retval = synaptics_rmi4_reg_read(rmi4_data,
-					base + offset + count,
-					buf,
-					2);
-			if (retval < 0) {
-				dev_err(rmi4_data->pdev->dev.parent,
-					"%s: Failed to read tddi force block count\n",
-					__func__);
-				goto exit;
-			}
-			batohs(&fwu->blkcount.tddi_force_config, &(buf[0]));
-			count++;
-			fwu->has_force_config = true;
-		}
-		if (properties_2->has_lockdown_data) {
-			retval = synaptics_rmi4_reg_read(rmi4_data,
-					base + offset + count,
-					buf,
-					2);
-			if (retval < 0) {
-				dev_err(rmi4_data->pdev->dev.parent,
-					"%s: Failed to read tddi lockdown block count\n",
-					__func__);
-				goto exit;
-			}
-			batohs(&fwu->blkcount.tddi_lockdown_data, &(buf[0]));
-			count++;
-			fwu->has_lockdown_data = true;
-		}
-		if (properties_2->has_lcm_data) {
-			retval = synaptics_rmi4_reg_read(rmi4_data,
-					base + offset + count,
-					buf,
-					2);
-			if (retval < 0) {
-				dev_err(rmi4_data->pdev->dev.parent,
-					"%s: Failed to read tddi lcm block count\n",
-					__func__);
-				goto exit;
-			}
-			batohs(&fwu->blkcount.tddi_lcm_data, &(buf[0]));
-			count++;
-			fwu->has_lcm_data = true;
-		}
-		if (properties_2->has_oem_data) {
-			retval = synaptics_rmi4_reg_read(rmi4_data,
-					base + offset + count,
-					buf,
-					2);
-			if (retval < 0) {
-				dev_err(rmi4_data->pdev->dev.parent,
-					"%s: Failed to read tddi oem block count\n",
-					__func__);
-				goto exit;
-			}
-			batohs(&fwu->blkcount.tddi_oem_data, &(buf[0]));
-			fwu->has_oem_data = true;
-		}
-#endif
 	}
 
 	fwu->has_utility_param = false;
-exit:
-	kfree(properties_2);
-	kfree(buf);
-	return retval;
+
+	return 0;
 }
 
 static int fwu_read_f34_queries(void)
@@ -2708,8 +2661,6 @@ static int fwu_get_image_firmware_id(unsigned int *fw_id)
 		while (strptr[index] >= '0' && strptr[index] <= '9') {
 			firmware_id[index] = strptr[index];
 			index++;
-			if (index == MAX_FIRMWARE_ID_LEN - 1)
-				break;
 		}
 
 		retval = sstrtoul(firmware_id, 10, (unsigned long *)fw_id);
@@ -2729,7 +2680,13 @@ static int fwu_get_device_config_id(void)
 {
 	int retval;
 	unsigned char config_id_size;
-	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
+	struct synaptics_rmi4_data *rmi4_data;
+	if (fwu == NULL)
+	{
+		pr_info("F@TOUCH : %s fwu == null\n", __func__);
+		return -1;
+	}
+	rmi4_data = fwu->rmi4_data;
 
 	if (fwu->bl_version == BL_V7 || fwu->bl_version == BL_V8)
 		config_id_size = V7_CONFIG_ID_SIZE;
@@ -2810,6 +2767,8 @@ static enum flash_area fwu_go_nogo(void)
 		config_id_size = V5V6_CONFIG_ID_SIZE;
 
 	for (ii = 0; ii < config_id_size; ii++) {
+		pr_info("F@TOUCH %s config_id[%d]:%02x\n",__func__,ii,fwu->config_id[ii]);
+		pr_info("F@TOUCH %s img.ui_config.data[%d]:%02x\n",__func__,ii,fwu->img.ui_config.data[ii]);
 		if (fwu->img.ui_config.data[ii] > fwu->config_id[ii]) {
 			flash_area = UI_CONFIG;
 			goto exit;
@@ -2849,6 +2808,7 @@ static int fwu_scan_pdt(void)
 	bool f01found = false;
 	bool f34found = false;
 	bool f35found = false;
+	struct synaptics_rmi4_fn_desc rmi_fd;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
 	fwu->in_ub_mode = false;
@@ -2856,38 +2816,38 @@ static int fwu_scan_pdt(void)
 	for (addr = PDT_START; addr > PDT_END; addr -= PDT_ENTRY_SIZE) {
 		retval = synaptics_rmi4_reg_read(rmi4_data,
 				addr,
-				(unsigned char *)&rmi4_data->rmi_fd,
-				sizeof(rmi4_data->rmi_fd));
+				(unsigned char *)&rmi_fd,
+				sizeof(rmi_fd));
 		if (retval < 0)
 			return retval;
 
-		if (rmi4_data->rmi_fd.fn_number) {
+		if (rmi_fd.fn_number) {
 			dev_dbg(rmi4_data->pdev->dev.parent,
 					"%s: Found F%02x\n",
-					__func__, rmi4_data->rmi_fd.fn_number);
-			switch (rmi4_data->rmi_fd.fn_number) {
+					__func__, rmi_fd.fn_number);
+			switch (rmi_fd.fn_number) {
 			case SYNAPTICS_RMI4_F01:
 				f01found = true;
 
 				rmi4_data->f01_query_base_addr =
-					rmi4_data->rmi_fd.query_base_addr;
+						rmi_fd.query_base_addr;
 				rmi4_data->f01_ctrl_base_addr =
-					rmi4_data->rmi_fd.ctrl_base_addr;
+						rmi_fd.ctrl_base_addr;
 				rmi4_data->f01_data_base_addr =
-					rmi4_data->rmi_fd.data_base_addr;
+						rmi_fd.data_base_addr;
 				rmi4_data->f01_cmd_base_addr =
-					rmi4_data->rmi_fd.cmd_base_addr;
+						rmi_fd.cmd_base_addr;
 				break;
 			case SYNAPTICS_RMI4_F34:
 				f34found = true;
 				fwu->f34_fd.query_base_addr =
-					rmi4_data->rmi_fd.query_base_addr;
+						rmi_fd.query_base_addr;
 				fwu->f34_fd.ctrl_base_addr =
-					rmi4_data->rmi_fd.ctrl_base_addr;
+						rmi_fd.ctrl_base_addr;
 				fwu->f34_fd.data_base_addr =
-					rmi4_data->rmi_fd.data_base_addr;
+						rmi_fd.data_base_addr;
 
-				switch (rmi4_data->rmi_fd.fn_version) {
+				switch (rmi_fd.fn_version) {
 				case F34_V0:
 					fwu->bl_version = BL_V5;
 					break;
@@ -2905,7 +2865,7 @@ static int fwu_scan_pdt(void)
 				}
 
 				fwu->intr_mask = 0;
-				intr_src = rmi4_data->rmi_fd.intr_src_count;
+				intr_src = rmi_fd.intr_src_count;
 				intr_off = intr_count % 8;
 				for (ii = intr_off;
 						ii < (intr_src + intr_off);
@@ -2916,20 +2876,20 @@ static int fwu_scan_pdt(void)
 			case SYNAPTICS_RMI4_F35:
 				f35found = true;
 				fwu->f35_fd.query_base_addr =
-					rmi4_data->rmi_fd.query_base_addr;
+						rmi_fd.query_base_addr;
 				fwu->f35_fd.ctrl_base_addr =
-					rmi4_data->rmi_fd.ctrl_base_addr;
+						rmi_fd.ctrl_base_addr;
 				fwu->f35_fd.data_base_addr =
-					rmi4_data->rmi_fd.data_base_addr;
+						rmi_fd.data_base_addr;
 				fwu->f35_fd.cmd_base_addr =
-					rmi4_data->rmi_fd.cmd_base_addr;
+						rmi_fd.cmd_base_addr;
 				break;
 			}
 		} else {
 			break;
 		}
 
-		intr_count += rmi4_data->rmi_fd.intr_src_count;
+		intr_count += rmi_fd.intr_src_count;
 	}
 
 	if (!f01found || !f34found) {
@@ -3051,7 +3011,7 @@ static int fwu_check_ui_firmware_size(void)
 {
 	unsigned short block_count;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	block_count = fwu->img.ui_firmware.size / fwu->block_size;
 
 	if (block_count != fwu->blkcount.ui_firmware) {
@@ -3068,7 +3028,7 @@ static int fwu_check_ui_configuration_size(void)
 {
 	unsigned short block_count;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	block_count = fwu->img.ui_config.size / fwu->block_size;
 
 	if (block_count != fwu->blkcount.ui_config) {
@@ -3085,7 +3045,7 @@ static int fwu_check_dp_configuration_size(void)
 {
 	unsigned short block_count;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	block_count = fwu->img.dp_config.size / fwu->block_size;
 
 	if (block_count != fwu->blkcount.dp_config) {
@@ -3098,7 +3058,6 @@ static int fwu_check_dp_configuration_size(void)
 	return 0;
 }
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static int fwu_check_pm_configuration_size(void)
 {
 	unsigned short block_count;
@@ -3115,13 +3074,12 @@ static int fwu_check_pm_configuration_size(void)
 
 	return 0;
 }
-#endif
 
 static int fwu_check_bl_configuration_size(void)
 {
 	unsigned short block_count;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	block_count = fwu->img.bl_config.size / fwu->block_size;
 
 	if (block_count != fwu->blkcount.bl_config) {
@@ -3138,7 +3096,7 @@ static int fwu_check_guest_code_size(void)
 {
 	unsigned short block_count;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	block_count = fwu->img.guest_code.size / fwu->block_size;
 	if (block_count != fwu->blkcount.guest_code) {
 		dev_err(rmi4_data->pdev->dev.parent,
@@ -3226,35 +3184,6 @@ static int fwu_erase_bootloader(void)
 	return 0;
 }
 
-#ifdef SYNA_TDDI
-static int fwu_erase_lockdown_data(void)
-{
-	int retval;
-	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
-	retval = fwu_write_f34_command(CMD_ERASE_LOCKDOWN_DATA);
-	if (retval < 0)
-		return retval;
-
-	dev_dbg(rmi4_data->pdev->dev.parent,
-			"%s: Erase command written\n",
-			__func__);
-
-	msleep(100);
-
-	retval = fwu_wait_for_idle(ERASE_WAIT_MS, false);
-	if (retval < 0)
-		return retval;
-
-	dev_dbg(rmi4_data->pdev->dev.parent,
-			"%s: Idle status detected\n",
-			__func__);
-
-	return 0;
-}
-
-#endif
-
 static int fwu_erase_guest_code(void)
 {
 	int retval;
@@ -3283,7 +3212,7 @@ static int fwu_erase_all(void)
 {
 	int retval;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	if (fwu->bl_version == BL_V7) {
 		retval = fwu_write_f34_command(CMD_ERASE_UI_FIRMWARE);
 		if (retval < 0)
@@ -3458,7 +3387,7 @@ image_param:
 }
 
 static int fwu_write_configuration(void)
-{
+{pr_info("F@TOUCH %s ",__func__);
 	return fwu_write_f34_blocks((unsigned char *)fwu->config_data,
 			fwu->config_block_count, CMD_WRITE_CONFIG);
 }
@@ -3469,7 +3398,7 @@ static int fwu_write_ui_configuration(void)
 	fwu->config_data = fwu->img.ui_config.data;
 	fwu->config_size = fwu->img.ui_config.size;
 	fwu->config_block_count = fwu->config_size / fwu->block_size;
-
+pr_info("F@TOUCH %s ",__func__);
 	return fwu_write_configuration();
 }
 
@@ -3483,7 +3412,6 @@ static int fwu_write_dp_configuration(void)
 	return fwu_write_configuration();
 }
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static int fwu_write_pm_configuration(void)
 {
 	fwu->config_area = PM_CONFIG_AREA;
@@ -3493,23 +3421,6 @@ static int fwu_write_pm_configuration(void)
 
 	return fwu_write_configuration();
 }
-
-#ifdef SYNA_TDDI
-static int fwu_write_tddi_lockdown_data(void)
-{
-	int retval;
-	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
-	retval = fwu_write_f34_blocks(fwu->read_config_buf,
-			fwu->blkcount.tddi_lockdown_data,
-			CMD_WRITE_LOCKDOWN_DATA);
-	if (retval < 0)
-		return retval;
-	rmi4_data->reset_device(rmi4_data, false);
-	return 0;
-}
-#endif
-#endif
 
 static int fwu_write_flash_configuration(void)
 {
@@ -3570,7 +3481,7 @@ static int fwu_write_partition_table_v8(void)
 {
 	int retval;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s ",__func__);
 	fwu->config_area = FLASH_CONFIG_AREA;
 	fwu->config_data = fwu->img.fl_config.data;
 	fwu->config_size = fwu->img.fl_config.size;
@@ -3596,7 +3507,7 @@ static int fwu_write_partition_table_v7(void)
 {
 	int retval;
 	unsigned short block_count;
-
+pr_info("F@TOUCH %s ",__func__);
 	block_count = fwu->blkcount.bl_config;
 	fwu->config_area = BL_CONFIG_AREA;
 	fwu->config_size = fwu->block_size * block_count;
@@ -3696,23 +3607,23 @@ static int fwu_do_reflash(void)
 	int retval;
 	bool do_bl_update = false;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s  1",__func__);
 	if (!fwu->new_partition_table) {
 		retval = fwu_check_ui_firmware_size();
 		if (retval < 0)
 			return retval;
-
+pr_info("F@TOUCH %s  2",__func__);
 		retval = fwu_check_ui_configuration_size();
 		if (retval < 0)
 			return retval;
-
+pr_info("F@TOUCH %s  3",__func__);
 		if (fwu->flash_properties.has_disp_config &&
 				fwu->img.contains_disp_config) {
 			retval = fwu_check_dp_configuration_size();
 			if (retval < 0)
 				return retval;
 		}
-
+pr_info("F@TOUCH %s  4",__func__);
 		if (fwu->has_guest_code && fwu->img.contains_guest_code) {
 			retval = fwu_check_guest_code_size();
 			if (retval < 0)
@@ -3723,7 +3634,7 @@ static int fwu_do_reflash(void)
 		if (retval < 0)
 			return retval;
 	}
-
+pr_info("F@TOUCH %s  5",__func__);
 	if (!fwu->has_utility_param && fwu->img.contains_utility_param) {
 		if (fwu->bl_version == BL_V7 || fwu->bl_version == BL_V8)
 			do_bl_update = true;
@@ -3768,8 +3679,18 @@ static int fwu_do_reflash(void)
 			return retval;
 		pr_notice("%s: Partition table programmed\n", __func__);
 	}
+pr_info("F@TOUCH %s  6",__func__);
+	retval = fwu_write_firmware();
+	if (retval < 0)
+		return retval;
+	pr_notice("%s: Firmware programmed\n", __func__);
 
 	fwu->config_area = UI_CONFIG_AREA;
+	retval = fwu_write_ui_configuration();
+	if (retval < 0)
+		return retval;
+	pr_notice("%s: Configuration programmed\n", __func__);
+
 	if (fwu->flash_properties.has_disp_config &&
 			fwu->img.contains_disp_config) {
 		retval = fwu_write_dp_configuration();
@@ -3778,11 +3699,6 @@ static int fwu_do_reflash(void)
 		pr_notice("%s: Display configuration programmed\n", __func__);
 	}
 
-	retval = fwu_write_ui_configuration();
-	if (retval < 0)
-		return retval;
-	pr_notice("%s: Configuration programmed\n", __func__);
-
 	if (fwu->has_guest_code && fwu->img.contains_guest_code) {
 		retval = fwu_write_guest_code();
 		if (retval < 0)
@@ -3790,15 +3706,9 @@ static int fwu_do_reflash(void)
 		pr_notice("%s: Guest code programmed\n", __func__);
 	}
 
-	retval = fwu_write_firmware();
-	if (retval < 0)
-		return retval;
-	pr_notice("%s: Firmware programmed\n", __func__);
-
 	return retval;
 }
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static int fwu_do_read_config(void)
 {
 	int retval;
@@ -3846,35 +3756,6 @@ static int fwu_do_read_config(void)
 		}
 		block_count = fwu->blkcount.utility_param;
 		break;
-#ifdef SYNA_TDDI
-	case TDDI_FORCE_CONFIG_AREA:
-		if (!fwu->has_force_config) {
-			dev_err(rmi4_data->pdev->dev.parent,
-					"%s: force configuration not supported\n",
-					__func__);
-			return -EINVAL;
-		}
-		block_count = fwu->blkcount.tddi_force_config;
-		break;
-	case TDDI_OEM_DATA_AREA:
-		if (!fwu->has_oem_data) {
-			dev_err(rmi4_data->pdev->dev.parent,
-					"%s: oem data not supported\n",
-					__func__);
-			return -EINVAL;
-		}
-		block_count = fwu->blkcount.tddi_oem_data;
-		break;
-	case TDDI_LCM_DATA_AREA:
-		if (!fwu->has_lcm_data) {
-			dev_err(rmi4_data->pdev->dev.parent,
-					"%s: lcm data not supported\n",
-					__func__);
-			return -EINVAL;
-		}
-		block_count = fwu->blkcount.tddi_lcm_data;
-		break;
-#endif
 	default:
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Invalid config area\n",
@@ -3915,118 +3796,6 @@ exit:
 
 	return retval;
 }
-
-#ifdef SYNA_TDDI
-static int fwu_do_read_tddi_lockdown_data(void)
-{
-	int retval = -EINVAL;
-	unsigned short block_count;
-	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
-	block_count = fwu->blkcount.tddi_lockdown_data;
-	fwu->config_size = fwu->block_size * block_count;
-
-	if (fwu->bl_version != BL_V6) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Not support lockdown data in bl v.%d\n",
-				__func__,
-				fwu->bl_version);
-		goto exit;
-	} else if (!fwu->has_lockdown_data) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Not support lockdown data\n", __func__);
-		goto exit;
-	}
-
-	kfree(fwu->read_config_buf);
-
-	fwu->read_config_buf = kzalloc(fwu->config_size, GFP_KERNEL);
-
-	if (!fwu->read_config_buf) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Failed to alloc mem for fwu->read_config_buf\n",
-				__func__);
-		fwu->read_config_buf_size = 0;
-		retval = -ENOMEM;
-		goto exit;
-	}
-	fwu->read_config_buf_size = fwu->config_size;
-	retval = fwu_read_f34_blocks(block_count, CMD_READ_LOCKDOWN_DATA);
-exit:
-	return retval;
-}
-
-int get_tddi_lockdown_data(unsigned char *lockdown_data, unsigned short leng)
-{
-	int retval;
-
-	retval = fwu_do_read_tddi_lockdown_data();
-	if (retval < 0)
-		return retval;
-	memcpy(lockdown_data, fwu->read_config_buf, leng);
-	return retval;
-}
-
-int set_tddi_lockdown_data(unsigned char *lockdown_data, unsigned short leng)
-{
-	int retval = -EINVAL;
-	unsigned long checksum;
-	unsigned char checksum_array[4];
-	unsigned short blk_cnt;
-	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
-	if (fwu->bl_version != BL_V6) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Not support lockdown data in bl v.%d\n",
-				__func__,
-				fwu->bl_version);
-		goto exit;
-	} else if (!fwu->has_lockdown_data) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Not support lockdown data\n", __func__);
-		goto exit;
-	}
-
-	retval = fwu_enter_flash_prog();
-	if (retval < 0)
-		goto exit;
-
-	retval = fwu_erase_lockdown_data();
-	if (retval < 0)
-		goto exit;
-
-	blk_cnt = fwu->blkcount.tddi_lockdown_data;
-
-	fwu->config_size = fwu->blkcount.tddi_lockdown_data * fwu->block_size;
-	retval = fwu_allocate_read_config_buf(fwu->config_size);
-	if (retval < 0)
-		goto exit;
-	memset(fwu->read_config_buf, 0x00, fwu->config_size);
-	retval = secure_memcpy(fwu->read_config_buf, fwu->config_size,
-			lockdown_data, leng, leng);
-	if (retval < 0) {
-		dev_err(rmi4_data->pdev->dev.parent,
-				"%s: Failed to copy tddi lockdwon data\n",
-				__func__);
-		goto exit;
-	}
-
-	calculate_checksum((unsigned short *)fwu->read_config_buf,
-			((fwu->config_size - 4) / 2),
-			&checksum);
-
-	convert_to_little_endian(checksum_array, checksum);
-
-	fwu->read_config_buf[blk_cnt * fwu->block_size - 4] = checksum_array[0];
-	fwu->read_config_buf[blk_cnt * fwu->block_size - 3] = checksum_array[1];
-	fwu->read_config_buf[blk_cnt * fwu->block_size - 2] = checksum_array[2];
-	fwu->read_config_buf[blk_cnt * fwu->block_size - 1] = checksum_array[3];
-	retval = fwu_write_tddi_lockdown_data();
-exit:
-	return retval;
-}
-#endif
-#endif
 
 static int fwu_do_lockdown_v7(void)
 {
@@ -4069,20 +3838,6 @@ static int fwu_do_lockdown_v5v6(void)
 {
 	int retval;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-#ifdef SYNA_TDDI
-	unsigned char *img_ld;
-
-	img_ld = (unsigned char *)fwu->img.lockdown.data;
-	if (fwu->has_lockdown_data) {
-		retval = set_tddi_lockdown_data(img_ld,
-				LOCKDOWN_SIZE);
-		if (retval < 0)
-			dev_err(rmi4_data->pdev->dev.parent,
-					"%s: Failed to write lockdown data\n",
-					__func__);
-		return retval;
-	}
-#endif
 
 	retval = fwu_enter_flash_prog();
 	if (retval < 0)
@@ -4177,7 +3932,6 @@ static int fwu_do_restore_f51_cal_data(void)
 }
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static int fwu_start_write_guest_code(void)
 {
 	int retval;
@@ -4383,7 +4137,6 @@ exit:
 
 	return retval;
 }
-#endif
 
 static int fwu_start_reflash(void)
 {
@@ -4392,7 +4145,7 @@ static int fwu_start_reflash(void)
 	bool do_rebuild = false;
 	const struct firmware *fw_entry = NULL;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
+pr_info("F@TOUCH %s",__func__);
 	if (rmi4_data->sensor_sleep) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Sensor sleeping\n",
@@ -4407,9 +4160,26 @@ static int fwu_start_reflash(void)
 	pr_notice("%s: Start of reflash process\n", __func__);
 
 	if (fwu->image == NULL) {
-		retval = secure_memcpy(fwu->image_name, MAX_IMAGE_NAME_LEN,
-				FW_IMAGE_NAME, sizeof(FW_IMAGE_NAME),
-				sizeof(FW_IMAGE_NAME));
+		pr_info("F@TOUCH %s  1",__func__);
+		if(touch_panel_select==1)// || touch_panel_select==0)
+		{//JGR
+			retval = secure_memcpy(fwu->image_name, MAX_IMAGE_NAME_LEN,
+				FW_IMAGE_NAME_JGR, sizeof(FW_IMAGE_NAME_JGR),
+				sizeof(FW_IMAGE_NAME_JGR));
+		}
+		if(touch_panel_select==2)
+		{//VN3
+			retval = secure_memcpy(fwu->image_name, MAX_IMAGE_NAME_LEN,
+				FW_IMAGE_NAME_VN3, sizeof(FW_IMAGE_NAME_VN3),
+				sizeof(FW_IMAGE_NAME_VN3));
+		}
+		if(touch_panel_select==0)
+		{//NB1
+			retval = secure_memcpy(fwu->image_name, MAX_IMAGE_NAME_LEN,
+				FW_IMAGE_NAME_NB1, sizeof(FW_IMAGE_NAME_NB1),
+				sizeof(FW_IMAGE_NAME_NB1));
+		}
+
 		if (retval < 0) {
 			dev_err(rmi4_data->pdev->dev.parent,
 					"%s: Failed to copy image file name\n",
@@ -4419,9 +4189,12 @@ static int fwu_start_reflash(void)
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: Requesting firmware image %s\n",
 				__func__, fwu->image_name);
-
+pr_info("%s: Requesting firmware image %s\n",
+				__func__, fwu->image_name);
 		retval = request_firmware(&fw_entry, fwu->image_name,
 				rmi4_data->pdev->dev.parent);
+pr_info("%s: Requesting firmware image %s retval = %d\n",
+				__func__, fwu->image_name,retval);
 		if (retval != 0) {
 			dev_err(rmi4_data->pdev->dev.parent,
 					"%s: Firmware image %s not available\n",
@@ -4433,14 +4206,16 @@ static int fwu_start_reflash(void)
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: Firmware image size = %d\n",
 				__func__, (unsigned int)fw_entry->size);
+	pr_info("%s: Firmware image size = %d\n",
+				__func__, (int)fw_entry->size);
 
 		fwu->image = fw_entry->data;
 	}
-
+pr_info("F@TOUCH %s  2",__func__);
 	retval = fwu_parse_image_info();
 	if (retval < 0)
 		goto exit;
-
+pr_info("F@TOUCH %s  3",__func__);
 	if (fwu->blkcount.total_count != fwu->img.blkcount.total_count) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Flash size mismatch\n",
@@ -4448,7 +4223,7 @@ static int fwu_start_reflash(void)
 		retval = -EINVAL;
 		goto exit;
 	}
-
+pr_info("F@TOUCH %s  4",__func__);
 	if (fwu->bl_version != fwu->img.bl_version) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Bootloader version mismatch\n",
@@ -4460,7 +4235,7 @@ static int fwu_start_reflash(void)
 	retval = fwu_read_flash_status();
 	if (retval < 0)
 		goto exit;
-
+pr_info("F@TOUCH %s  7",__func__);
 	if (fwu->in_bl_mode) {
 		fwu->bl_mode_device = true;
 		dev_info(rmi4_data->pdev->dev.parent,
@@ -4469,9 +4244,9 @@ static int fwu_start_reflash(void)
 	} else {
 		fwu->bl_mode_device = false;
 	}
-
+pr_info("F@TOUCH %s  8",__func__);
 	flash_area = fwu_go_nogo();
-
+pr_info("F@TOUCH %s  9",__func__);
 	if (flash_area != NONE) {
 		retval = fwu_enter_flash_prog();
 		if (retval < 0) {
@@ -4536,6 +4311,7 @@ static int fwu_start_reflash(void)
 		break;
 	case UI_CONFIG:
 		do_rebuild = true;
+		pr_info("F@TOUCH %s  12",__func__);
 		retval = fwu_check_ui_configuration_size();
 		if (retval < 0)
 			break;
@@ -4596,6 +4372,7 @@ static int fwu_start_reflash(void)
 	}
 
 exit:
+	pr_info("%s: exit 1\n",	__func__);
 	if (fw_entry)
 		release_firmware(fw_entry);
 
@@ -4960,7 +4737,7 @@ int synaptics_fw_updater(const unsigned char *fw_data)
 
 	if (!fwu)
 		return -ENODEV;
-
+pr_info("F@TOUCH %s  1",__func__);
 	if (!fwu->initialized)
 		return -ENODEV;
 
@@ -4972,9 +4749,9 @@ int synaptics_fw_updater(const unsigned char *fw_data)
 	}
 
 	fwu->image = fw_data;
-
+pr_info("F@TOUCH %s  4",__func__);
 	retval = fwu_start_reflash();
-
+pr_info("F@TOUCH %s  5",__func__);
 	fwu->image = NULL;
 
 	return retval;
@@ -4985,11 +4762,13 @@ EXPORT_SYMBOL(synaptics_fw_updater);
 static void fwu_startup_fw_update_work(struct work_struct *work)
 {
 	static unsigned char do_once = 1;
+	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
+	int retval_reg = 0;
 #ifdef WAIT_FOR_FB_READY
 	unsigned int timeout;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 #endif
-
+pr_info("F@TOUCH %s\n",__func__);
 	if (!do_once)
 		return;
 	do_once = 0;
@@ -5009,13 +4788,19 @@ static void fwu_startup_fw_update_work(struct work_struct *work)
 	}
 #endif
 
-	synaptics_fw_updater(NULL);
-
+	retval_reg = synaptics_fw_updater(NULL);
+	if (retval_reg < 0)
+	{
+			dev_err(rmi4_data->pdev->dev.parent,
+					"%s: Failed to do reflash\n",
+					__func__);
+			fw_upgrade_flag = 1;
+	}
+	fw_upgrade_flag = 0;
 	return;
 }
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 static ssize_t fwu_sysfs_show_image(struct file *data_file,
 		struct kobject *kobj, struct bin_attribute *attributes,
 		char *buf, loff_t pos, size_t count)
@@ -5023,15 +4808,11 @@ static ssize_t fwu_sysfs_show_image(struct file *data_file,
 	int retval;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
 	if (count < fwu->config_size) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Not enough space (%d bytes) in buffer\n",
 				__func__, (unsigned int)count);
-		retval = -EINVAL;
-		goto exit;
+		return -EINVAL;
 	}
 
 	retval = secure_memcpy(buf, count, fwu->read_config_buf,
@@ -5040,14 +4821,10 @@ static ssize_t fwu_sysfs_show_image(struct file *data_file,
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to copy config data\n",
 				__func__);
-		goto exit;
-	} else {
-		retval = fwu->config_size;
+		return retval;
 	}
 
-exit:
-	mutex_unlock(&fwu_sysfs_mutex);
-	return retval;
+	return fwu->config_size;
 }
 
 static ssize_t fwu_sysfs_store_image(struct file *data_file,
@@ -5057,25 +4834,18 @@ static ssize_t fwu_sysfs_store_image(struct file *data_file,
 	int retval;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
 	retval = secure_memcpy(&fwu->ext_data_source[fwu->data_pos],
 			fwu->image_size - fwu->data_pos, buf, count, count);
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to copy image data\n",
 				__func__);
-		goto exit;
-	} else {
-		retval = count;
+		return retval;
 	}
 
 	fwu->data_pos += count;
 
-exit:
-	mutex_unlock(&fwu_sysfs_mutex);
-	return retval;
+	return count;
 }
 
 static ssize_t fwu_sysfs_do_recovery_store(struct device *dev,
@@ -5085,10 +4855,7 @@ static ssize_t fwu_sysfs_do_recovery_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	if (kstrtouint(buf, 10, &input) != 1) {
+	if (sscanf(buf, "%u", &input) != 1) {
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -5101,12 +4868,10 @@ static ssize_t fwu_sysfs_do_recovery_store(struct device *dev,
 		goto exit;
 	}
 
-	if (!fwu->ext_data_source) {
-		retval = -EINVAL;
-		goto exit;
-	} else {
+	if (!fwu->ext_data_source)
+		return -EINVAL;
+	else
 		fwu->image = fwu->ext_data_source;
-	}
 
 	retval = fwu_start_recovery();
 	if (retval < 0) {
@@ -5122,7 +4887,6 @@ exit:
 	kfree(fwu->ext_data_source);
 	fwu->ext_data_source = NULL;
 	fwu->image = NULL;
-	mutex_unlock(&fwu_sysfs_mutex);
 	return retval;
 }
 
@@ -5132,15 +4896,12 @@ static ssize_t fwu_sysfs_do_reflash_store(struct device *dev,
 	int retval;
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	if (kstrtouint(buf, 10, &input) != 1) {
+pr_info("F@TOUCH %s",__func__);
+	if (sscanf(buf, "%u", &input) != 1) {
 		retval = -EINVAL;
 		goto exit;
 	}
-
+pr_info("F@TOUCH %s input = %d\n",__func__,input);
 	if (fwu->in_ub_mode) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: In microbootloader mode\n",
@@ -5148,35 +4909,39 @@ static ssize_t fwu_sysfs_do_reflash_store(struct device *dev,
 		retval = -EINVAL;
 		goto exit;
 	}
-
-	if (!fwu->ext_data_source) {
-		retval =  -EINVAL;
-		goto exit;
-	} else {
-		fwu->image = fwu->ext_data_source;
+/*
+	if (!fwu->ext_data_source)
+	{pr_info("F@TOUCH %s fwu->ext_data_source 1 \n",__func__);
+		return -EINVAL;
 	}
-
+	else
+	{pr_info("F@TOUCH %s fwu->ext_data_source 2 \n",__func__);
+		fwu->image = fwu->ext_data_source;
+	}*/
+pr_info("F@TOUCH %s  1",__func__);
 	if (input & LOCKDOWN) {
 		fwu->do_lockdown = true;
 		input &= ~LOCKDOWN;
 	}
-
+pr_info("F@TOUCH %s  2",__func__);
 	if ((input != NORMAL) && (input != FORCE)) {
 		retval = -EINVAL;
 		goto exit;
 	}
-
+pr_info("F@TOUCH %s  3",__func__);
 	if (input == FORCE)
 		fwu->force_update = true;
-
+pr_info("F@TOUCH %s  4",__func__);
 	retval = synaptics_fw_updater(fwu->image);
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to do reflash\n",
 				__func__);
+		fw_upgrade_flag = 1;
 		goto exit;
 	}
-
+	fw_upgrade_flag = 0;
+pr_info("F@TOUCH %s  5",__func__);
 	retval = count;
 
 exit:
@@ -5185,7 +4950,6 @@ exit:
 	fwu->image = NULL;
 	fwu->force_update = FORCE_UPDATE;
 	fwu->do_lockdown = DO_LOCKDOWN;
-	mutex_unlock(&fwu_sysfs_mutex);
 	return retval;
 }
 
@@ -5196,10 +4960,7 @@ static ssize_t fwu_sysfs_write_config_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	if (kstrtouint(buf, 10, &input) != 1) {
+	if (sscanf(buf, "%u", &input) != 1) {
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -5217,12 +4978,10 @@ static ssize_t fwu_sysfs_write_config_store(struct device *dev,
 		goto exit;
 	}
 
-	if (!fwu->ext_data_source) {
-		retval = -EINVAL;
-		goto exit;
-	} else {
+	if (!fwu->ext_data_source)
+		return -EINVAL;
+	else
 		fwu->image = fwu->ext_data_source;
-	}
 
 	retval = fwu_start_write_config();
 	if (retval < 0) {
@@ -5238,7 +4997,6 @@ exit:
 	kfree(fwu->ext_data_source);
 	fwu->ext_data_source = NULL;
 	fwu->image = NULL;
-	mutex_unlock(&fwu_sysfs_mutex);
 	return retval;
 }
 
@@ -5249,21 +5007,17 @@ static ssize_t fwu_sysfs_read_config_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	if (input != 1)
 		return -EINVAL;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
 	if (fwu->in_ub_mode) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: In microbootloader mode\n",
 				__func__);
-		retval =  -EINVAL;
-		goto exit;
+		return -EINVAL;
 	}
 
 	retval = fwu_do_read_config();
@@ -5271,14 +5025,10 @@ static ssize_t fwu_sysfs_read_config_store(struct device *dev,
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read config\n",
 				__func__);
-		goto exit;
+		return retval;
 	}
 
-	retval = count;
-
-exit:
-	mutex_unlock(&fwu_sysfs_mutex);
-	return retval;
+	return count;
 }
 
 static ssize_t fwu_sysfs_config_area_store(struct device *dev,
@@ -5291,12 +5041,7 @@ static ssize_t fwu_sysfs_config_area_store(struct device *dev,
 	if (retval)
 		return retval;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
 	fwu->config_area = config_area;
-
-	mutex_unlock(&fwu_sysfs_mutex);
 
 	return count;
 }
@@ -5307,22 +5052,16 @@ static ssize_t fwu_sysfs_image_name_store(struct device *dev,
 	int retval;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
 	retval = secure_memcpy(fwu->image_name, MAX_IMAGE_NAME_LEN,
 			buf, count, count);
 	if (retval < 0) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to copy image file name\n",
 				__func__);
-	} else {
-		retval = count;
+		return retval;
 	}
 
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return count;
 }
 
 static ssize_t fwu_sysfs_image_size_store(struct device *dev,
@@ -5336,9 +5075,6 @@ static ssize_t fwu_sysfs_image_size_store(struct device *dev,
 	if (retval)
 		return retval;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
 	fwu->image_size = size;
 	fwu->data_pos = 0;
 
@@ -5348,134 +5084,58 @@ static ssize_t fwu_sysfs_image_size_store(struct device *dev,
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Failed to alloc mem for image data\n",
 				__func__);
-		retval = -ENOMEM;
-	} else {
-		retval = count;
+		return -ENOMEM;
 	}
 
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return count;
 }
 
 static ssize_t fwu_sysfs_block_size_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval =  snprintf(buf, PAGE_SIZE, "%u\n", fwu->block_size);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->block_size);
 }
 
 static ssize_t fwu_sysfs_firmware_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.ui_firmware);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.ui_firmware);
 }
 
 static ssize_t fwu_sysfs_configuration_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.ui_config);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.ui_config);
 }
 
 static ssize_t fwu_sysfs_disp_config_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.dp_config);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.dp_config);
 }
 
 static ssize_t fwu_sysfs_perm_config_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.pm_config);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.pm_config);
 }
 
 static ssize_t fwu_sysfs_bl_config_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.bl_config);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.bl_config);
 }
 
 static ssize_t fwu_sysfs_utility_parameter_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.utility_param);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.utility_param);
 }
 
 static ssize_t fwu_sysfs_guest_code_block_count_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int retval;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	retval = snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.guest_code);
-
-	mutex_unlock(&fwu_sysfs_mutex);
-
-	return retval;
+	return snprintf(buf, PAGE_SIZE, "%u\n", fwu->blkcount.guest_code);
 }
 
 static ssize_t fwu_sysfs_write_guest_code_store(struct device *dev,
@@ -5485,10 +5145,7 @@ static ssize_t fwu_sysfs_write_guest_code_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
 
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	if (kstrtouint(buf, 10, &input) != 1) {
+	if (sscanf(buf, "%u", &input) != 1) {
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -5506,12 +5163,10 @@ static ssize_t fwu_sysfs_write_guest_code_store(struct device *dev,
 		goto exit;
 	}
 
-	if (!fwu->ext_data_source) {
-		retval = -EINVAL;
-		goto exit;
-	} else {
+	if (!fwu->ext_data_source)
+		return -EINVAL;
+	else
 		fwu->image = fwu->ext_data_source;
-	}
 
 	retval = fwu_start_write_guest_code();
 	if (retval < 0) {
@@ -5527,92 +5182,9 @@ exit:
 	kfree(fwu->ext_data_source);
 	fwu->ext_data_source = NULL;
 	fwu->image = NULL;
-	mutex_unlock(&fwu_sysfs_mutex);
 	return retval;
 }
 
-#ifdef SYNA_TDDI
-static ssize_t fwu_sysfs_read_lockdown_code_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	unsigned short lockdown_data_size;
-	unsigned char *lockdown_data;
-	char ld_val[2];
-	int retval = 0;
-	int i = 0;
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	lockdown_data_size = fwu->blkcount.tddi_lockdown_data * fwu->block_size;
-	lockdown_data = kzalloc(lockdown_data_size, GFP_KERNEL);
-	if (!lockdown_data) {
-		mutex_unlock(&fwu_sysfs_mutex);
-		return -ENOMEM;
-	}
-
-	if (get_tddi_lockdown_data(lockdown_data, lockdown_data_size) < 0) {
-		kfree(lockdown_data);
-		mutex_unlock(&fwu_sysfs_mutex);
-		return -EINVAL;
-	}
-
-	for (i = 0; i < lockdown_data_size; i++) {
-		retval += snprintf(ld_val, PAGE_SIZE, "%02x",
-				*(lockdown_data + i));
-		strlcat(buf, ld_val, lockdown_data_size);
-	}
-	*(buf + retval) = '\n';
-	kfree(lockdown_data);
-	mutex_unlock(&fwu_sysfs_mutex);
-	return retval + 1;
-}
-
-static ssize_t fwu_sysfs_write_lockdown_code_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned short lockdown_data_size = (count - 1) / 2;
-	unsigned char *lockdown_data;
-	unsigned char temp[2];
-	int ld_val;
-	int i = 0;
-
-	for (i = 0; i < (count - 1); i++) {
-		if (((*buf >= '0') && (*buf <= '9')) ||
-				(('a' < *buf) && (*buf > 'f')) ||
-				(('A' < *buf) && (*buf > 'F')))
-			continue;
-		else
-			return -EINVAL;
-	}
-
-	if (count % 2 != 1)
-		return -EINVAL;
-
-	lockdown_data = kzalloc(lockdown_data_size, GFP_KERNEL);
-	if (!lockdown_data)
-		return -ENOMEM;
-
-	for (i = 0; i < lockdown_data_size; i++) {
-		memcpy(temp, (buf + 2 * i), sizeof(temp));
-		if (kstrtoint(temp, 16, &ld_val) == 1)
-			*(lockdown_data + i) = ld_val & 0xff;
-	}
-
-	if (!mutex_trylock(&fwu_sysfs_mutex))
-		return -EBUSY;
-
-	if (set_tddi_lockdown_data(lockdown_data, lockdown_data_size) < 0) {
-		kfree(lockdown_data);
-		mutex_unlock(&fwu_sysfs_mutex);
-		return -EINVAL;
-	}
-	kfree(lockdown_data);
-	mutex_unlock(&fwu_sysfs_mutex);
-	return count;
-}
-#endif
-#endif
 static void synaptics_rmi4_fwu_attn(struct synaptics_rmi4_data *rmi4_data,
 		unsigned char intr_mask)
 {
@@ -5629,19 +5201,13 @@ static int synaptics_rmi4_fwu_init(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
 	unsigned char attr_count;
-	struct pdt_properties *pdt_props = NULL;
+	struct pdt_properties pdt_props;
 
 	if (fwu) {
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: Handle already exists\n",
 				__func__);
 		return 0;
-	}
-
-	pdt_props = kzalloc(sizeof(*pdt_props), GFP_KERNEL);
-	if (!pdt_props) {
-		retval = -ENOMEM;
-		goto exit;
 	}
 
 	fwu = kzalloc(sizeof(*fwu), GFP_KERNEL);
@@ -5666,13 +5232,13 @@ static int synaptics_rmi4_fwu_init(struct synaptics_rmi4_data *rmi4_data)
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			PDT_PROPS,
-			pdt_props->data,
-			sizeof(pdt_props->data));
+			pdt_props.data,
+			sizeof(pdt_props.data));
 	if (retval < 0) {
 		dev_dbg(rmi4_data->pdev->dev.parent,
 				"%s: Failed to read PDT properties, assuming 0x00\n",
 				__func__);
-	} else if (pdt_props->has_bsr) {
+	} else if (pdt_props.has_bsr) {
 		dev_err(rmi4_data->pdev->dev.parent,
 				"%s: Reflash for LTS not currently supported\n",
 				__func__);
@@ -5702,26 +5268,6 @@ static int synaptics_rmi4_fwu_init(struct synaptics_rmi4_data *rmi4_data)
 	fwu->do_lockdown = DO_LOCKDOWN;
 	fwu->initialized = true;
 
-#ifdef DO_STARTUP_FW_UPDATE
-	fwu->fwu_workqueue = create_singlethread_workqueue("fwu_workqueue");
-	INIT_WORK(&fwu->fwu_work, fwu_startup_fw_update_work);
-	queue_work(fwu->fwu_workqueue,
-			&fwu->fwu_work);
-#endif
-
-#ifdef F51_DISCRETE_FORCE
-	fwu_read_flash_status();
-	if (!fwu->in_bl_mode) {
-		retval = fwu_f51_force_data_init();
-		if (retval < 0)
-			goto exit_free_mem;
-	}
-#endif
-
-	if (ENABLE_SYS_REFLASH == false)
-		return 0;
-
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 	retval = sysfs_create_bin_file(&rmi4_data->input_dev->dev.kobj,
 			&dev_attr_data);
 	if (retval < 0) {
@@ -5730,7 +5276,6 @@ static int synaptics_rmi4_fwu_init(struct synaptics_rmi4_data *rmi4_data)
 				__func__);
 		goto exit_free_mem;
 	}
-#endif
 
 	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
 		retval = sysfs_create_file(&rmi4_data->input_dev->dev.kobj,
@@ -5744,6 +5289,30 @@ static int synaptics_rmi4_fwu_init(struct synaptics_rmi4_data *rmi4_data)
 		}
 	}
 
+#ifdef DO_STARTUP_FW_UPDATE
+	fwu->fwu_workqueue = create_singlethread_workqueue("fwu_workqueue");
+	INIT_WORK(&fwu->fwu_work, fwu_startup_fw_update_work);
+	queue_work(fwu->fwu_workqueue,
+			&fwu->fwu_work);
+#endif
+
+	/*Win add for proc callback function*/
+	touch_cb.touch_tpfwimver_read = touch_fwimver_read;
+	touch_cb.touch_fwupgrade_read = touch_upgrade_read;
+	touch_cb.touch_fwupgrade = touch_upgrade_write;
+	touch_cb.touch_fwback_write = touch_fwback_write;
+	touch_cb.touch_fwback_read = touch_fwback_read;
+	/*Win add for proc callback function*/
+	touch_cb.touch_tpfwver_read = touch_fwver_read;//SW8-DH-ConfigID-00+
+#ifdef F51_DISCRETE_FORCE
+	fwu_read_flash_status();
+	if (!fwu->in_bl_mode) {
+		retval = fwu_f51_force_data_init();
+		if (retval < 0)
+			goto exit_remove_attrs;
+	}
+#endif
+
 	return 0;
 
 exit_remove_attrs:
@@ -5752,9 +5321,7 @@ exit_remove_attrs:
 				&attrs[attr_count].attr);
 	}
 
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
 	sysfs_remove_bin_file(&rmi4_data->input_dev->dev.kobj, &dev_attr_data);
-#endif
 
 exit_free_mem:
 	kfree(fwu->image_name);
@@ -5764,7 +5331,6 @@ exit_free_fwu:
 	fwu = NULL;
 
 exit:
-	kfree(pdt_props);
 	return retval;
 }
 
@@ -5781,6 +5347,13 @@ static void synaptics_rmi4_fwu_remove(struct synaptics_rmi4_data *rmi4_data)
 	destroy_workqueue(fwu->fwu_workqueue);
 #endif
 
+	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
+		sysfs_remove_file(&rmi4_data->input_dev->dev.kobj,
+				&attrs[attr_count].attr);
+	}
+
+	sysfs_remove_bin_file(&rmi4_data->input_dev->dev.kobj, &dev_attr_data);
+
 #ifdef F51_DISCRETE_FORCE
 	kfree(fwu->cal_data);
 #endif
@@ -5788,18 +5361,6 @@ static void synaptics_rmi4_fwu_remove(struct synaptics_rmi4_data *rmi4_data)
 	kfree(fwu->image_name);
 	kfree(fwu);
 	fwu = NULL;
-
-	if (ENABLE_SYS_REFLASH == false)
-		goto exit;
-
-	for (attr_count = 0; attr_count < ARRAY_SIZE(attrs); attr_count++) {
-		sysfs_remove_file(&rmi4_data->input_dev->dev.kobj,
-				&attrs[attr_count].attr);
-	}
-
-#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE_EXTRA_SYSFS
-	sysfs_remove_bin_file(&rmi4_data->input_dev->dev.kobj, &dev_attr_data);
-#endif
 
 exit:
 	complete(&fwu_remove_complete);
@@ -5861,6 +5422,29 @@ static void __exit rmi4_fw_update_module_exit(void)
 	return;
 }
 
+//SW8-DH-ConfigID-00+[
+void touch_fwver_read(char *fwver)
+{
+	int retval =0;
+	int i = 0;
+
+	retval = fwu_get_device_config_id();
+	if (retval < 0) {
+		pr_err("%s: Failed to read device config ID\n",__func__);
+		sprintf(fwver, "TP-V%.8X\n",get_device_config_id);
+		goto exit;
+	}
+	for(i = 0; i < 4; i++)
+		pr_info("fwu->config_id[%d] = %d\n", i, fwu->config_id[i]);
+	get_device_config_id = fwu->config_id[0]<<24 | fwu->config_id[1]<<16 | fwu->config_id[2]<<8 | fwu->config_id[3];
+	pr_info("F@TOUCH : %s firmware version = %.8X\n", __func__,get_device_config_id);
+
+	if(touch_panel_select ==0)
+		sprintf(fwver, "TP-V%.8X\n",get_device_config_id);
+exit:
+	return;
+}
+//SW8-DH-ConfigID-00+]
 module_init(rmi4_fw_update_module_init);
 module_exit(rmi4_fw_update_module_exit);
 

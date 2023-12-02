@@ -2,7 +2,6 @@
  * siw_touch_gpio.c - SiW touch gpio driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -49,7 +48,7 @@ static int siw_touch_gpio_do_init(struct device *dev,
 	int ret = 0;
 
 	if (gpio_is_valid(pin)) {
-		t_dev_dbg_gpio(dev, "gpio_request: pin %d, name %s\n", pin, name);
+		t_dev_dbg_gpio(dev, "pin %d, name %s\n", pin, name);
 		ret = gpio_request(pin, name);
 		if (ret) {
 			t_dev_err(dev, "gpio_request[%s] failed, %d",
@@ -63,7 +62,6 @@ static int siw_touch_gpio_do_init(struct device *dev,
 static void siw_touch_gpio_do_free(struct device *dev, int pin)
 {
 	if (gpio_is_valid(pin)) {
-		t_dev_dbg_gpio(dev, "gpio_free: pin %d\n", pin);
 		gpio_free(pin);
 	}
 }
@@ -213,6 +211,7 @@ static int siw_touch_power_do_init(struct device *dev)
 	if (!(touch_flags(ts) & TOUCH_USE_PWRCTRL)) {
 		goto out;
 	}
+	t_dev_info(dev, "[FIH] %s, %d, touch_flags(ts) = %x, TOUCH_USE_PWRCTRL = %x\n", __func__, __LINE__, touch_flags(ts), TOUCH_USE_PWRCTRL);
 
 	vdd_pin = touch_vdd_pin(ts);
 	vio_pin = touch_vio_pin(ts);
@@ -245,44 +244,6 @@ out:
 	return 0;
 }
 
-static int siw_touch_power_do_free(struct device *dev)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	int vdd_pin = -1;
-	int vio_pin = -1;
-	void *vdd, *vio;
-
-	if (!(touch_flags(ts) & TOUCH_USE_PWRCTRL)) {
-		goto out;
-	}
-
-	vdd_pin = touch_vdd_pin(ts);
-	vio_pin = touch_vio_pin(ts);
-
-	t_dev_dbg_gpio(dev, "power free\n");
-
-	if (gpio_is_valid(vdd_pin)) {
-		gpio_free(vdd_pin);
-	} else {
-		vdd = touch_get_vdd(ts);
-		if (!IS_ERR(vdd)) {
-			regulator_put(vdd);
-		}
-	}
-
-	if (gpio_is_valid(vio_pin)) {
-		gpio_free(vio_pin);
-	} else {
-		vio = touch_get_vio(ts);
-		if (!IS_ERR(vio)) {
-			regulator_put(vio);
-		}
-	}
-
-out:
-	return 0;
-}
-
 static void siw_touch_power_do_vdd(struct device *dev, int value)
 {
 	struct siw_ts *ts = to_touch_core(dev);
@@ -294,6 +255,7 @@ static void siw_touch_power_do_vdd(struct device *dev, int value)
 	if (!(touch_flags(ts) & TOUCH_USE_PWRCTRL)) {
 		return;
 	}
+	t_dev_info(dev, "[FIH] %s, %d, value = %d\n", __func__, __LINE__, value);
 
 	vdd_pin = touch_vdd_pin(ts);
 	vdd = touch_get_vdd(ts);
@@ -327,6 +289,7 @@ static void siw_touch_power_do_vio(struct device *dev, int value)
 		return;
 	}
 
+	t_dev_info(dev, "[FIH] %s, %d, value = %d\n", __func__, __LINE__, value);
 	vio_pin = touch_vio_pin(ts);
 	vio = touch_get_vio(ts);
 
@@ -350,13 +313,6 @@ static void siw_touch_power_do_vio(struct device *dev, int value)
 static int siw_touch_power_do_init(struct device *dev)
 {
 	t_dev_dbg_gpio(dev, "power init, nop ...\n");
-
-	return 0;
-}
-
-static int siw_touch_power_do_free(struct device *dev)
-{
-	t_dev_dbg_gpio(dev, "power free, nop ...\n");
 
 	return 0;
 }
@@ -390,26 +346,6 @@ int siw_touch_power_init(struct device *dev)
 out:
 	return ret;
 }
-
-int siw_touch_power_free(struct device *dev)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	struct siw_touch_fquirks *fquirks = touch_fquirks(ts);
-	int ret = 0;
-
-	if (fquirks->power_free) {
-		ret = fquirks->power_free(dev);
-		if (ret != -EAGAIN) {
-			goto out;
-		}
-	}
-
-	ret = siw_touch_power_do_free(dev);
-
-out:
-	return ret;
-}
-
 
 void siw_touch_power_vdd(struct device *dev, int value)
 {

@@ -1,9 +1,8 @@
 /*
  * Synaptics DSX touchscreen driver
  *
- * Copyright (C) 2012-2016 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2012-2015 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
  *
@@ -120,7 +119,7 @@ struct rmidev_data {
 static struct bin_attribute attr_data = {
 	.attr = {
 		.name = "data",
-		.mode = 0664,
+		.mode = (S_IRUGO | S_IWUSR | S_IWGRP),
 	},
 	.size = 0,
 	.read = rmidev_sysfs_data_show,
@@ -128,25 +127,25 @@ static struct bin_attribute attr_data = {
 };
 
 static struct device_attribute attrs[] = {
-	__ATTR(open, 0220,
+	__ATTR(open, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			rmidev_sysfs_open_store),
-	__ATTR(release, 0220,
+	__ATTR(release, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			rmidev_sysfs_release_store),
-	__ATTR(attn_state, 0444,
+	__ATTR(attn_state, S_IRUGO,
 			rmidev_sysfs_attn_state_show,
 			synaptics_rmi4_store_error),
-	__ATTR(pid, 0664,
+	__ATTR(pid, (S_IRUGO | S_IWUSR | S_IWGRP),
 			rmidev_sysfs_pid_show,
 			rmidev_sysfs_pid_store),
-	__ATTR(term, 0220,
+	__ATTR(term, (S_IWUSR | S_IWGRP),
 			synaptics_rmi4_show_error,
 			rmidev_sysfs_term_store),
-	__ATTR(intr_mask, 0664,
+	__ATTR(intr_mask, (S_IRUGO | S_IWUSR | S_IWGRP),
 			rmidev_sysfs_intr_mask_show,
 			rmidev_sysfs_intr_mask_store),
-	__ATTR(concurrent, 0664,
+	__ATTR(concurrent, (S_IRUGO | S_IWUSR | S_IWGRP),
 			rmidev_sysfs_concurrent_show,
 			rmidev_sysfs_concurrent_store),
 };
@@ -322,7 +321,7 @@ static ssize_t rmidev_sysfs_open_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = rmidev->rmi4_data;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	if (input != 1)
@@ -353,7 +352,7 @@ static ssize_t rmidev_sysfs_release_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = rmidev->rmi4_data;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	if (input != 1)
@@ -393,7 +392,7 @@ static ssize_t rmidev_sysfs_pid_store(struct device *dev,
 	unsigned int input;
 	struct synaptics_rmi4_data *rmi4_data = rmidev->rmi4_data;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	rmidev->pid = input;
@@ -416,7 +415,7 @@ static ssize_t rmidev_sysfs_term_store(struct device *dev,
 {
 	unsigned int input;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	if (input != 1)
@@ -439,7 +438,7 @@ static ssize_t rmidev_sysfs_intr_mask_store(struct device *dev,
 {
 	unsigned int input;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	rmidev->intr_mask = (unsigned char)input;
@@ -458,7 +457,7 @@ static ssize_t rmidev_sysfs_concurrent_store(struct device *dev,
 {
 	unsigned int input;
 
-	if (kstrtouint(buf, 10, &input) != 1)
+	if (sscanf(buf, "%u", &input) != 1)
 		return -EINVAL;
 
 	rmidev->concurrent = input > 0 ? true : false;
@@ -574,14 +573,13 @@ static ssize_t rmidev_read(struct file *filp, char __user *buf,
 		retval = -EFAULT;
 		goto clean_up;
 	}
-
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
-
 	if (count == 0) {
 		retval = 0;
 		goto clean_up;
 	}
+
 	address = (unsigned short)(*f_pos);
 
 	rmidev_allocate_buffer(count);
@@ -651,14 +649,13 @@ static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 		retval = -EFAULT;
 		goto unlock;
 	}
-
 	if (count > (REG_ADDR_LIMIT - *f_pos))
 		count = REG_ADDR_LIMIT - *f_pos;
-
 	if (count == 0) {
 		retval = 0;
 		goto unlock;
 	}
+
 	rmidev_allocate_buffer(count);
 
 	if (copy_from_user(rmidev->tmpbuf, buf, count)) {

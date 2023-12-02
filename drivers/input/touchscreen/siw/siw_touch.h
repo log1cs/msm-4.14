@@ -2,7 +2,6 @@
  * SiW touch core driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -28,8 +27,6 @@
 #include <linux/atomic.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
-#include <linux/fs.h>
-#include <linux/slab.h>
 
 #if defined(__SIW_CONFIG_EARLYSUSPEND)
 #include <linux/earlysuspend.h>
@@ -50,7 +47,7 @@
 #include "siw_touch_dbg.h"
 
 
-#define SIW_DRV_VERSION		"v2.20b"
+#define SIW_DRV_VERSION		"v2.17b"
 
 
 enum {
@@ -101,7 +98,8 @@ enum {
 };
 
 enum {
-	DEV_PM_RESUME = 0,
+	DEV_PM_AWAKE = 0,
+	DEV_PM_RESUME,
 	DEV_PM_SUSPEND,
 	DEV_PM_SUSPEND_IRQ,
 };
@@ -133,8 +131,6 @@ enum {
 	INTERRUPT_DELAY_CTRL,
 	ACTIVE_AREA_CTRL,
 	ACTIVE_AREA_RESET_CTRL,
-	ACTIVE_AREA_QOPEN_CTRL,
-	ACTIVE_AREA_QCLOSE_CTRL,
 };
 
 enum {
@@ -174,15 +170,6 @@ enum {
 	LPWG_UPDATE_ALL,
 	LPWG_READ,
 	LPWG_REPLY,
-	LPWG_EXT_TCI_INFO_STORE = 0x80,
-	LPWG_EXT_TCI_QOPEN_AREA_STORE,
-	LPWG_EXT_TCI_QCLOSE_AREA_STORE,
-	LPWG_EXT_SWIPE_INFO_STORE,
-	LPWG_EXT_STORE_END,
-	LPWG_EXT_TCI_INFO_SHOW = 0x90,
-	LPWG_EXT_TCI_AREA_SHOW,
-	LPWG_EXT_SWIPE_INFO_SHOW,
-	LPWG_EXT_SHOW_END,
 };
 
 enum {
@@ -331,12 +318,6 @@ enum {
 	MINIOS_MFTS_CURVED,
 };
 
-enum {
-	QUICKCOVER_OPT_BASE = QUICKCOVER_CLOSE + 1,
-	/* */
-	QUICKCOVER_OPT_BIT_SKIP_CLOSE = BIT(0),
-};
-
 struct state_info {
 	atomic_t core;
 	atomic_t pm;
@@ -350,7 +331,6 @@ struct state_info {
 	atomic_t lockscreen;
 	atomic_t ime;
 	atomic_t quick_cover;
-	atomic_t quick_cover_opt;
 	atomic_t incoming_call;
 	atomic_t mfts;
 	atomic_t sp_link;
@@ -416,7 +396,7 @@ struct touch_data {
 	u16 y;
 	u16 width_major;
 	u16 width_minor;
-	s16 orientation;
+	u16 orientation;
 	u16 pressure;
 	/* finger, palm, pen, glove, hover */
 	u16 type;
@@ -464,6 +444,7 @@ struct tci_info {
 struct tci_ctrl {
 	u32 mode;
 	struct active_area area;
+	struct reset_area rst_area;
 	struct reset_area qcover_open;
 	struct reset_area qcover_close;
 	u8 double_tap_check;
@@ -497,7 +478,6 @@ struct siw_touch_operations {
 	int (*tc_con)(struct device *dev,	u32 code, void *param);
 	int (*tc_driving)(struct device *dev, int mode);
 	int (*chk_status)(struct device *dev);
-	int (*irq_dbg_handler)(struct device *dev);
 	int (*irq_handler)(struct device *dev);
 	int (*irq_abs)(struct device *dev);
 	int (*irq_lpwg)(struct device *dev);
@@ -558,12 +538,10 @@ struct siw_touch_fquirks {	//function quirks
 	int (*gpio_set_pull)(struct device *dev, int pin, int value);
 	/* */
 	int (*power_init)(struct device *dev);
-	int (*power_free)(struct device *dev);
 	int (*power_vdd)(struct device *dev, int value);
 	int (*power_vio)(struct device *dev, int value);
 	/* */
 	int (*fwup_check)(struct device *dev, u8 *fw_buf);
-	int (*fwup_upgrade)(struct device *dev, u8 *fw_buf, int fw_size, int retry);
 	/* */
 	int (*mon_handler)(struct device *dev, u32 opt);
 	int mon_interval;
@@ -688,6 +666,7 @@ struct siw_touch_pdata {
 	struct siw_touch_operations *ops;
 
 	void *tci_info;
+	void *tci_reset_area;
 	void *tci_qcover_open;
 	void *tci_qcover_close;
 	void *swipe_ctrl;
@@ -867,6 +846,11 @@ static inline void *pdata_tci_info(struct siw_touch_pdata *pdata)
 	return pdata->tci_info;
 }
 
+static inline void *pdata_tci_reset_area(struct siw_touch_pdata *pdata)
+{
+	return pdata->tci_reset_area;
+}
+
 static inline void *pdata_tci_qcover_open(struct siw_touch_pdata *pdata)
 {
 	return pdata->tci_qcover_open;
@@ -961,7 +945,6 @@ struct siw_ts {
 	char *ext_watch_name;	//ext_watch name
 	int max_finger;
 	int chip_type;
-	u32 mode_allowed;
 
 	int irq;
 	unsigned long irqflags;
@@ -1037,7 +1020,6 @@ struct siw_ts {
 
 	struct mutex lock;
 	struct mutex reset_lock;
-	struct mutex probe_lock;
 	struct workqueue_struct *wq;
 	struct delayed_work init_work;
 	struct delayed_work upgrade_work;
@@ -1056,9 +1038,6 @@ struct siw_ts {
 #endif
 #if defined(__SIW_CONFIG_FB)
 	struct notifier_block fb_notif;
-#endif
-#if defined(__SIW_CONFIG_USER_FB)
-	struct notifier_block user_fb_notif;
 #endif
 
 	struct siw_ts_thread mon_thread;
@@ -1091,7 +1070,6 @@ struct siw_ts {
 #define _TOUCH_USE_PROBE_INIT_LATE	(1UL<<24)
 
 #define _TOUCH_SKIP_ESD_EVENT		(1UL<<28)
-#define _TOUCH_SKIP_RESET_PIN		(1UL<<29)
 
 #define _TOUCH_IGNORE_DT_FLAGS		(1UL<<31)
 
@@ -1118,12 +1096,9 @@ struct siw_ts {
 	atomic_t recur_chk;
 
 	/* */
-	int is_charger;
-
-	/* */
 	int (*init_late)(void *data);
-	int init_late_done;
 
+	int RTC_CLK_gpio;//SW8-DH-AllPowerOff-00+
 };
 
 enum {
@@ -1152,8 +1127,7 @@ enum {
 	TOUCH_USE_PROBE_INIT_LATE	= _TOUCH_USE_PROBE_INIT_LATE,
 	/* */
 	TOUCH_SKIP_ESD_EVENT		= _TOUCH_SKIP_ESD_EVENT,
-	TOUCH_SKIP_RESET_PIN		= _TOUCH_SKIP_RESET_PIN,
-	/* */
+
 	TOUCH_IGNORE_DT_FLAGS		= _TOUCH_IGNORE_DT_FLAGS,
 };
 
@@ -1326,14 +1300,14 @@ static inline u32 touch_chip_type(struct siw_ts *ts)
 
 static inline u32 touch_mode_allowed(struct siw_ts *ts, u32 mode)
 {
-	return (ts->mode_allowed & BIT(mode));
+	return pdata_mode_allowed(ts->pdata, mode);
 }
 
 static inline u32 touch_mode_not_allowed(struct siw_ts *ts, u32 mode)
 {
 	int ret;
 
-	ret = !touch_mode_allowed(ts, mode);
+	ret = !pdata_mode_allowed(ts->pdata, mode);
 	if (ret) {
 		t_dev_warn(ts->dev, "target mode(%d) not supported\n", mode);
 	}
@@ -1524,11 +1498,6 @@ static inline void touch_set_vio(struct siw_ts *ts, void *vio)
 	ts->pins.vio = vio;
 }
 
-static inline int touch_qcover_opt_skip_close(struct siw_ts *ts)
-{
-	return !!(atomic_read(&ts->state.quick_cover_opt) & QUICKCOVER_OPT_BIT_SKIP_CLOSE);
-}
-
 
 static inline void *siw_ops_reg(struct siw_ts *ts)
 {
@@ -1551,11 +1520,9 @@ static inline void siw_ops_restore_irq_handler(struct siw_ts *ts)
 #define siw_ops_xxx(_ops, _ret, _ts, args...)	\
 		({	int _r = 0;	\
 			do {	\
-				if (_ts->ops->_ops == NULL) {	\
-					if ((_ret) < 0) {	\
-						t_dev_err(ts->dev, "%s isn't assigned\n", #_ops);	\
-						_r = _ret;	\
-					}	\
+				if (((_ret) < 0) && !_ts->ops->_ops) {	\
+					t_dev_err(ts->dev, "%s isn't assigned\n", #_ops);	\
+					_r = _ret;	\
 					break;	\
 				}	\
 				_r = _ts->ops->_ops(_ts->dev, ##args);	\
@@ -1702,12 +1669,12 @@ extern void siw_touch_mon_resume(struct device *dev);
 extern int siw_touch_probe(struct siw_ts *ts);
 extern int siw_touch_remove(struct siw_ts *ts);
 
-extern int siw_touch_init_late(struct siw_ts *ts, int value);
+extern int siw_touch_init_late(void *data);
 
 extern int siw_touch_notify(struct siw_ts *ts, unsigned long event, void *data);
 
 
-#if defined(CONFIG_TOUCHSCREEN_SIWMON) || defined(CONFIG_TOUCHSCREEN_SIWMON_MODULE)
+#if defined(CONFIG_TOUCHSCREEN_SIWMON)
 
 struct touch_bus_msg;
 
@@ -1793,20 +1760,21 @@ static inline void siwmon_submit_ops(struct device *dev, char *ops, void *data, 
 #endif	/* MODULE */
 
 #define siw_chip_module_init(_name, _data, _desc, _author)	\
-		static int __init siw_touch_driver_init(void)\
+		static int __init chip_##_name##_driver_init(void)\
 		{	\
+			touch_msleep(200);	\
 			t_pr_info("%s: %s driver init - %s\n",	\
 				_data.pdata->drv_name, _name, SIW_DRV_VERSION);	\
 			return siw_touch_bus_add_driver(&_data);	\
 		}	\
-		static void __exit siw_touch_driver_exit(void)	\
+		static void __exit chip_##_name##_driver_exit(void)	\
 		{	\
 			(void)siw_touch_bus_del_driver(&_data);\
 			t_pr_info("%s: %s driver exit - %s\n",	\
 				_data.pdata->drv_name, _name, SIW_DRV_VERSION);	\
 		}	\
-		module_init(siw_touch_driver_init);	\
-		module_exit(siw_touch_driver_exit);	\
+		module_init(chip_##_name##_driver_init);	\
+		module_exit(chip_##_name##_driver_exit);	\
 		MODULE_AUTHOR(_author);	\
 		MODULE_DESCRIPTION(_desc);	\
 		MODULE_VERSION(SIW_DRV_VERSION);	\

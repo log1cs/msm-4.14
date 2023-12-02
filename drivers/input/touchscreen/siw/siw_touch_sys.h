@@ -2,7 +2,6 @@
  * SiW touch system interface
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -27,9 +26,6 @@ extern int siw_touch_sys_get_panel_bl(struct device *dev);
 extern int siw_touch_sys_set_panel_bl(struct device *dev, int level);
 
 extern int siw_touch_sys_osc(struct device *dev, int onoff);
-
-extern int siw_touch_sys_fb_register_client(struct device *dev);
-extern int siw_touch_sys_fb_unregister_client(struct device *dev);
 
 #endif	/* __SIW_TOUCH_SYS_H */
 

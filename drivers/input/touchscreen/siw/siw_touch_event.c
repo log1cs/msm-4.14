@@ -2,7 +2,6 @@
  * siw_touch_event.c - SiW touch event driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -40,22 +39,6 @@
 #include "siw_touch_event.h"
 
 
-#define __siw_input_report_key(_idev, _code, _value)	\
-	do {	\
-		if (t_dbg_flag & DBG_FLAG_SKIP_IEVENT) {	\
-			t_dev_dbg_event(&_idev->dev, "skip input report: c %d, v %d\n", _code, _value);	\
-		} else {	\
-			input_report_key(_idev, _code, _value);	\
-		}	\
-	} while (0)
-
-#define siw_input_report_key(_idev, _code, _value)	\
-	do {	\
-		__siw_input_report_key(_idev, _code, _value);	\
-		siwmon_submit_evt(&_idev->dev, "EV_KEY", EV_KEY, #_code, _code, _value, 0);	\
-	} while (0)
-
-
 #define __siw_input_report_abs(_idev, _code, _value)	\
 	do {	\
 		if (t_dbg_flag & DBG_FLAG_SKIP_IEVENT) {	\
@@ -71,25 +54,23 @@
 		siwmon_submit_evt(&_idev->dev, "EV_ABS", EV_ABS, #_code, _code, _value, 0);	\
 	} while (0)
 
-static void siw_touch_report_cancel_event(struct siw_ts *ts)
+static void siw_touch_report_palm_event(struct siw_ts *ts)
 {
-	struct input_dev *input = ts->input;
 	u16 old_mask = ts->old_mask;
 	int i = 0;
 
-	if (!input) {
-		t_dev_err(ts->dev, "no input device (cancel)\n");
+	if (!ts->input)
 		return;
-	}
 
 	for (i = 0; i < touch_max_finger(ts); i++) {
 		if (old_mask & (1 << i)) {
-			input_mt_slot(input, i);
-			input_mt_report_slot_state(input, MT_TOOL_FINGER, true);
-			siw_input_report_key(input, BTN_TOUCH, 1);
-			siw_input_report_key(input, BTN_TOOL_FINGER, 1);
-			siw_input_report_abs(input, ABS_MT_PRESSURE, 255);
-			t_dev_info(&input->dev, "finger canceled <%d> (%4d, %4d, %4d)\n",
+			input_mt_slot(ts->input, i);
+			//SW8-DH-Ignore_PRESSURE_value-[
+			//siw_input_report_abs(ts->input,
+			//				ABS_MT_PRESSURE,
+			//				255);
+			//SW8-DH-Ignore_PRESSURE_value-]
+			t_dev_info(&ts->input->dev, "finger canceled <%d> (%4d, %4d, %4d)\n",
 						i,
 						ts->tdata[i].x,
 						ts->tdata[i].y,
@@ -97,15 +78,13 @@ static void siw_touch_report_cancel_event(struct siw_ts *ts)
 		}
 	}
 
-	input_sync(input);
+	input_sync(ts->input);
 }
 
 void siw_touch_report_event(void *ts_data)
 {
 	struct siw_ts *ts = ts_data;
-	struct input_dev *input = ts->input;
-	struct device *idev = NULL;
-	struct touch_data *tdata = NULL;
+	struct device *idev = &ts->input->dev;
 	u16 old_mask = ts->old_mask;
 	u16 new_mask = ts->new_mask;
 	u16 press_mask = 0;
@@ -115,12 +94,8 @@ void siw_touch_report_event(void *ts_data)
 
 //	t_dev_trcf(idev);
 
-	if (!input) {
-		t_dev_err(ts->dev, "no input device (report)\n");
+	if (!ts->input)
 		return;
-	}
-
-	idev = &input->dev;
 
 	change_mask = old_mask ^ new_mask;
 	press_mask = new_mask & change_mask;
@@ -135,42 +110,53 @@ void siw_touch_report_event(void *ts_data)
 
 	/* Palm state - Report Pressure value 255 */
 	if (ts->is_palm) {
-		siw_touch_report_cancel_event(ts);
+		siw_touch_report_palm_event(ts);
 		ts->is_palm = 0;
 	}
 
-	tdata = ts->tdata;
-	for (i = 0; i < touch_max_finger(ts); i++, tdata++) {
+	for (i = 0; i < touch_max_finger(ts); i++) {
 		if (new_mask & (1 << i)) {
-			input_mt_slot(input, i);
-			input_mt_report_slot_state(input, MT_TOOL_FINGER, true);
-			siw_input_report_key(input, BTN_TOUCH, 1);
-			siw_input_report_key(input, BTN_TOOL_FINGER, 1);
-			siw_input_report_abs(input, ABS_MT_TRACKING_ID, tdata->id);
-			siw_input_report_abs(input, ABS_MT_POSITION_X, tdata->x);
-			siw_input_report_abs(input, ABS_MT_POSITION_Y, tdata->y);
-			siw_input_report_abs(input, ABS_MT_PRESSURE, tdata->pressure);
-			siw_input_report_abs(input, ABS_MT_WIDTH_MAJOR, tdata->width_major);
-			siw_input_report_abs(input, ABS_MT_WIDTH_MINOR, tdata->width_minor);
-			siw_input_report_abs(input, ABS_MT_ORIENTATION, tdata->orientation);
+			input_mt_slot(ts->input, i);
+			siw_input_report_abs(ts->input, ABS_MT_TRACKING_ID,
+						ts->tdata[i].id);
+
+			//Flip touch event for NB1 panel.
+			#if 0 
+			siw_input_report_abs(ts->input, ABS_MT_POSITION_X,
+						ts->tdata[i].x);
+			siw_input_report_abs(ts->input, ABS_MT_POSITION_Y,
+						ts->tdata[i].y);
+			#else
+			//SW8-DH-Flip_x_y_event-00+[
+			siw_input_report_abs(ts->input, ABS_MT_POSITION_X,
+						ts->caps.max_x - ts->tdata[i].x);
+			siw_input_report_abs(ts->input, ABS_MT_POSITION_Y,
+						ts->caps.max_y - ts->tdata[i].y);
+			//SW8-DH-Flip_x_y_event-00+]
+			#endif
+			//SW8-DH-Ignore_PRESSURE_value-[
+			//siw_input_report_abs(ts->input, ABS_MT_PRESSURE,
+			//			ts->tdata[i].pressure);
+			//SW8-DH-Ignore_PRESSURE_value-]
+			siw_input_report_abs(ts->input, ABS_MT_WIDTH_MAJOR,
+						ts->tdata[i].width_major);
+			siw_input_report_abs(ts->input, ABS_MT_WIDTH_MINOR,
+						ts->tdata[i].width_minor);
+			siw_input_report_abs(ts->input, ABS_MT_ORIENTATION,
+						ts->tdata[i].orientation);
 
 			if (press_mask & (1 << i)) {
-				t_dev_dbg_button(idev, "%d finger press <%d> (%4d, %4d, %4d)\n",
+				t_dev_dbg_abs(idev, "%d finger press <%d> (%4d, %4d, %4d)\n",
 						ts->tcount,
 						i,
 						ts->tdata[i].x,
 						ts->tdata[i].y,
 						ts->tdata[i].pressure);
 			}
-
-			continue;
-		}
-
-		if (release_mask & (1 << i)) {
-			input_mt_slot(input, i);
-			input_mt_report_slot_state(input, MT_TOOL_FINGER, false);
-		//	siw_input_report_abs(ts->input, ABS_MT_TRACKING_ID, -1);
-			t_dev_dbg_button(idev, "finger release <%d> (%4d, %4d, %4d)\n",
+		} else if (release_mask & (1 << i)) {
+			input_mt_slot(ts->input, i);
+			siw_input_report_abs(ts->input, ABS_MT_TRACKING_ID, -1);
+			t_dev_dbg_abs(idev, "finger release <%d> (%4d, %4d, %4d)\n",
 					i,
 					ts->tdata[i].x,
 					ts->tdata[i].y,
@@ -178,14 +164,9 @@ void siw_touch_report_event(void *ts_data)
 		}
 	}
 
-	if (!ts->tcount) {
-		siw_input_report_key(input, BTN_TOUCH, 0);
-		siw_input_report_key(input, BTN_TOOL_FINGER, 0);
-	}
-
 	ts->old_mask = new_mask;
 
-	input_sync(input);
+	input_sync(ts->input);
 }
 
 void siw_touch_report_all_event(void *ts_data)
@@ -252,17 +233,9 @@ static const struct siw_touch_uevent_ctrl siw_uevent_ctrl_default = {
 void siw_touch_send_uevent(void *ts_data, int type)
 {
 	struct siw_ts *ts = ts_data;
-	struct input_dev *input = ts->input;
-	struct device *idev = NULL;
 	struct siw_touch_uevent_ctrl *uevent_ctrl = touch_uevent_ctrl(ts);
+	struct device *idev = &ts->input->dev;
 	char *str = NULL;
-
-	if (!input) {
-		t_dev_err(ts->dev, "no input device (uevent)\n");
-		return;
-	}
-
-	idev = &ts->input->dev;
 
 	if (uevent_ctrl == NULL) {
 		uevent_ctrl = (struct siw_touch_uevent_ctrl *)&siw_uevent_ctrl_default;
@@ -294,7 +267,7 @@ void siw_touch_send_uevent(void *ts_data, int type)
 
 		atomic_set(&ts->state.uevent, UEVENT_BUSY);
 
-		siw_kobject_uevent_env(input, type, &ts->udev.kobj,
+		siw_kobject_uevent_env(ts->input, type, &ts->udev.kobj,
 						KOBJ_CHANGE, uevent_ctrl->str[type]);
 
 		t_dev_info(ts->dev, "%s\n", str);
@@ -305,6 +278,14 @@ void siw_touch_send_uevent(void *ts_data, int type)
 		 * clear(UEVENT_IDLE) state.event
 		 */
 	}
+	//SW8-DH-Double_Tap_Test-00+[
+	t_dev_info(ts->dev, "%s, Send KEY_WAKEUP Pressed\n", __func__);
+	input_report_key(ts->input, KEY_WAKEUP, 1);
+	input_sync(ts->input);
+	t_dev_info(ts->dev, "%s, Send KEY_WAKEUP Released\n", __func__);
+	input_report_key(ts->input, KEY_WAKEUP, 0);
+	input_sync(ts->input);
+	//SW8-DH-Double_Tap_Test-00+]
 }
 
 int siw_touch_init_uevent(void *ts_data)
@@ -428,22 +409,27 @@ int siw_touch_init_input(void *ts_data)
 
 	set_bit(EV_SYN, input->evbit);
 	set_bit(EV_ABS, input->evbit);
-	set_bit(EV_KEY, input->evbit);
-	set_bit(BTN_TOUCH, input->keybit);
-	set_bit(BTN_TOOL_FINGER, input->keybit);
 	set_bit(INPUT_PROP_DIRECT, input->propbit);
 	input_set_abs_params(input, ABS_MT_POSITION_X, 0,
 				caps->max_x, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_Y, 0,
 				caps->max_y, 0, 0);
-	input_set_abs_params(input, ABS_MT_PRESSURE, 0,
-				caps->max_pressure, 0, 0);
+	//SW8-DH-Ignore_PRESSURE_value-[
+	//input_set_abs_params(input, ABS_MT_PRESSURE, 0,
+	//			caps->max_pressure, 0, 0);
+	//SW8-DH-Ignore_PRESSURE_value-]
 	input_set_abs_params(input, ABS_MT_WIDTH_MAJOR, 0,
 				caps->max_width, 0, 0);
 	input_set_abs_params(input, ABS_MT_WIDTH_MINOR, 0,
 				caps->max_width, 0, 0);
 	input_set_abs_params(input, ABS_MT_ORIENTATION, 0,
 				caps->max_orientation, 0, 0);
+
+	//SW-DH-Double_Tap_Test-00+[
+	set_bit(KEY_WAKEUP, input->keybit);
+	input_set_capability(input, EV_KEY, KEY_WAKEUP);
+	//SW-DH-Double_Tap_Test-00+]
+	
 
 	/* Initialize multi-touch slot */
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))

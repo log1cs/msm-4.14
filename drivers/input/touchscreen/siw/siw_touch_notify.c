@@ -2,7 +2,6 @@
  * siw_touch_notify.c - SiW touch notify driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -116,6 +115,20 @@ void siw_touch_notify_earjack(u32 type)
 }
 EXPORT_SYMBOL(siw_touch_notify_earjack);
 
+static int siw_touch_atomic_notifier_callback(struct notifier_block *this,
+				   unsigned long event, void *data)
+{
+	struct siw_ts *ts =
+		container_of(this, struct siw_ts, atomic_notif);
+
+	ts->notify_event = event;
+	ts->notify_data = *(int *)data;
+
+	siw_touch_qd_notify_work_now(ts);
+
+	return 0;
+}
+
 static int _siw_touch_do_notify(struct siw_ts *ts,
 				   unsigned long event, void *data)
 {
@@ -125,22 +138,10 @@ static int _siw_touch_do_notify(struct siw_ts *ts,
 	int call_hal_notify = 1;
 	u32 value = 0;
 	int ret = 0;
+	t_dev_dbg_base(dev, "%s, %d, event = %ld\n", __func__, __LINE__, event);
 
 	if (data) {
 		value = *((int *)data);
-	}
-
-	switch (event) {
-	case LCD_EVENT_TOUCH_INIT_LATE:
-		ret = siw_touch_init_late(ts, value);
-
-		call_hal_notify = 0;
-		noti_str = "INIT_LATE";
-		goto out;
-	}
-
-	if (touch_get_dev_data(ts) == NULL) {
-		return 0;
 	}
 
 	if (siw_ops_is_null(ts, notify)) {
@@ -193,14 +194,20 @@ static int _siw_touch_do_notify(struct siw_ts *ts,
 		ret = siw_ops_notify(ts, event, data);
 		break;
 
+	case LCD_EVENT_TOUCH_INIT_LATE:
+		ret = siw_touch_init_late(ts);
+
+		call_hal_notify = 0;
+		noti_str = "INIT_LATE";
+		break;
+
 	default:
 		ret = siw_ops_notify(ts, event, data);
 		break;
 	}
 
-out:
 	if (!call_hal_notify) {
-		t_dev_info(dev, "notify: event %s(%Xh), value %Xh\n",
+		t_dev_dbg_base(dev, "notify: event %s(%Xh), value %Xh\n",
 			noti_str, (int)event, value);
 		siwmon_submit_evt(dev, "NOTIFY", 0, noti_str, event, value, ret);
 	}
@@ -211,18 +218,19 @@ out:
 int siw_touch_notify(struct siw_ts *ts, unsigned long event, void *data)
 {
 	int noti_allowed = 0;
-	int core_state = atomic_read(&ts->state.core);
+	int core_state = 0;
 	int ret = 0;
 
+	if (siw_touch_get_boot_mode() == SIW_TOUCH_CHARGER_MODE) {
+		return 0;
+	}
+
+	core_state = atomic_read(&ts->state.core);
 	switch (event) {
 	case LCD_EVENT_TOUCH_INIT_LATE:
 		noti_allowed = !!(core_state == CORE_PROBE);
 		break;
 	default:
-		if (ts->is_charger) {
-			return 0;
-		}
-
 		noti_allowed = !!(core_state == CORE_NORMAL);
 		break;
 	}
@@ -246,21 +254,8 @@ static int siw_touch_blocking_notifier_callback(struct notifier_block *this,
 {
 	struct siw_ts *ts =
 		container_of(this, struct siw_ts, blocking_notif);
+	t_dev_dbg_base(ts->dev, "%s, %d\n", __func__, __LINE__);
 	return siw_touch_notify(ts, event, data);
-}
-
-static int siw_touch_atomic_notifier_callback(struct notifier_block *this,
-				   unsigned long event, void *data)
-{
-	struct siw_ts *ts =
-		container_of(this, struct siw_ts, atomic_notif);
-
-	ts->notify_event = event;
-	ts->notify_data = (data == NULL) ? 0 : *(int *)data;
-
-	siw_touch_qd_notify_work_now(ts);
-
-	return 0;
 }
 
 void siw_touch_atomic_notifer_work_func(struct work_struct *work)
@@ -268,6 +263,7 @@ void siw_touch_atomic_notifer_work_func(struct work_struct *work)
 	struct siw_ts *ts =
 		container_of(to_delayed_work(work),
 				struct siw_ts, notify_work);
+	t_dev_dbg_base(ts->dev, "%s, %d\n", __func__, __LINE__);
 
 	siw_touch_notify(ts, ts->notify_event, &ts->notify_data);
 }
@@ -276,6 +272,7 @@ int siw_touch_init_notify(struct siw_ts *ts)
 {
 	struct device *dev = ts->dev;
 	int ret = 0;
+	t_dev_dbg_base(ts->dev, "%s, %d\n", __func__, __LINE__);
 
 	ts->blocking_notif.notifier_call = siw_touch_blocking_notifier_callback;
 	ret = siw_touch_blocking_notifier_register(&ts->blocking_notif);

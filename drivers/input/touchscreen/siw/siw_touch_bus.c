@@ -2,7 +2,6 @@
  * siw_touch_bus.c - SiW touch bus core driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -50,6 +49,7 @@
 #include "siw_touch_bus_spi.h"
 #include "siw_touch_sys.h"
 
+extern int tp_probe_success;
 
 int siw_touch_bus_tr_data_init(struct siw_ts *ts)
 {
@@ -183,6 +183,7 @@ int siw_touch_bus_pin_put(struct siw_ts *ts)
 void *siw_touch_bus_create_bus_drv(int bus_type)
 {
 	struct siw_touch_bus_drv *bus_drv;
+	t_pr_info("[FIH] %s, %d\n", __func__, __LINE__);
 
 	bus_drv = kzalloc(sizeof(*bus_drv), GFP_KERNEL);
 	if (!bus_drv) {
@@ -392,6 +393,7 @@ int siw_touch_bus_free_buffer(struct siw_ts *ts)
 int siw_touch_bus_init(struct device *dev)
 {
 	struct siw_ts *ts = to_touch_core(dev);
+	t_dev_info(dev, "[FIH] %s, %d\n", __func__, __LINE__);
 
 	if (!ts->bus_init) {
 		t_dev_err(dev, "no bus_init %s(%d)\n",
@@ -497,6 +499,10 @@ static const struct siw_op_dbg siw_bus_init_ops[2][2] = {
 		_SIW_OP_DBG(DRIVER_FREE, siw_touch_i2c_del_driver, NULL, 0),
 		_SIW_OP_DBG(DRIVER_INIT, siw_touch_i2c_add_driver, NULL, 0),
 	},
+	[BUS_IF_SPI] = {
+		_SIW_OP_DBG(DRIVER_FREE, siw_touch_spi_del_driver, NULL, 0),
+		_SIW_OP_DBG(DRIVER_INIT, siw_touch_spi_add_driver, NULL, 0),
+	},
 };
 
 #define SIW_BUS_MAX		(sizeof(siw_bus_init_ops) / sizeof(siw_bus_init_ops[0]))
@@ -504,7 +510,7 @@ static const struct siw_op_dbg siw_bus_init_ops[2][2] = {
 static int __siw_touch_bus_add_chk(struct siw_touch_chip_data *chip_data)
 {
 	int bus_type;
-
+	t_pr_info("[FIH] %s %d\n", __func__, __LINE__);
 	if (chip_data == NULL) {
 		t_pr_err("NULL touch chip data\n");
 		return -ENODEV;
@@ -516,6 +522,7 @@ static int __siw_touch_bus_add_chk(struct siw_touch_chip_data *chip_data)
 	}
 
 	bus_type = pdata_bus_type((struct siw_touch_pdata *)chip_data->pdata);
+	t_pr_info("[FIH] %s %d, bus_type = %d\n", __func__, __LINE__, bus_type);
 	if (bus_type >= SIW_BUS_MAX) {
 		t_pr_err("Unknown touch interface : %d\n", bus_type);
 		return -EINVAL;
@@ -530,7 +537,7 @@ static int __siw_touch_bus_add_op(
 {
 	struct siw_op_dbg *op = op_func;
 	int ret = 0;
-
+	t_pr_info("[FIH] %s %d\n", __func__, __LINE__);
 	ret = __siw_touch_bus_add_chk(chip_data);
 	if (ret)
 		goto out;
@@ -548,12 +555,19 @@ out:
 
 static int __siw_touch_bus_add_driver(struct siw_touch_chip_data *chip_data, int on_off)
 {
+	t_pr_info("[FIH] %s %d\n", __func__, __LINE__);
 	return __siw_touch_bus_add_op(chip_data,
 			(void *)&siw_bus_init_ops[chip_data->pdata->bus_info.bus_type][on_off]);
 }
 
 int siw_touch_bus_add_driver(struct siw_touch_chip_data *chip_data)
 {
+	t_pr_info("[FIH] %s %d\n", __func__, __LINE__);
+	if(tp_probe_success == 1)
+	{
+		t_pr_info("[FIH] tp_probe_success, skip LGD touch probed\n");
+		return 0;
+	}
 	return __siw_touch_bus_add_driver(chip_data, DRIVER_INIT);
 }
 
@@ -562,26 +576,20 @@ int siw_touch_bus_del_driver(struct siw_touch_chip_data *chip_data)
 	return __siw_touch_bus_add_driver(chip_data, DRIVER_FREE);
 }
 
-#if defined(__SIW_CONFIG_USER_FB)
-#define	siw_touch_bus_suspend_call(_dev)	t_dev_info(_dev, "bus_suspend_call\n")
-#define	siw_touch_bus_resume_call(_dev)		t_dev_info(_dev, "bus_resume_call\n")
-#else	/* __SIW_CONFIG_USER_FB */
-#define	siw_touch_bus_suspend_call(_dev)	siw_touch_suspend_call(_dev)
-#define	siw_touch_bus_resume_call(_dev)		siw_touch_resume_call(_dev)
-#endif	/* __SIW_CONFIG_USER_FB */
-
-static int siw_touch_bus_do_pm_suspend(struct device *dev)
+int siw_touch_bus_pm_suspend(struct device *dev)
 {
 	struct siw_ts *ts = to_touch_core(dev);
 
-	siw_touch_bus_suspend_call(dev);
+	siw_touch_suspend_call(dev);
 
 	atomic_set(&ts->state.pm, DEV_PM_SUSPEND);
+
+	t_dev_info(dev, "touch bus pm suspend done\n");
 
 	return 0;
 }
 
-static int siw_touch_bus_do_pm_resume(struct device *dev)
+int siw_touch_bus_pm_resume(struct device *dev)
 {
 	struct siw_ts *ts = to_touch_core(dev);
 	int resume_irq = 0;
@@ -590,7 +598,7 @@ static int siw_touch_bus_do_pm_resume(struct device *dev)
 		resume_irq = 1;
 	}
 
-	siw_touch_bus_resume_call(dev);
+	siw_touch_resume_call(dev);
 
 	atomic_set(&ts->state.pm, DEV_PM_RESUME);
 
@@ -598,45 +606,9 @@ static int siw_touch_bus_do_pm_resume(struct device *dev)
 		siw_touch_resume_irq(dev);
 	}
 
+	t_dev_info(dev, "touch bus pm resume done\n");
+
 	return 0;
-}
-
-int siw_touch_bus_pm_suspend(struct device *dev, int freeze)
-{
-//	struct siw_ts *ts = to_touch_core(dev);
-	int ret = 0;
-
-	if (freeze) {
-		siw_touch_mon_pause(dev);
-	}
-
-	ret = siw_touch_bus_do_pm_suspend(dev);
-
-	if (freeze) {
-	//	siw_touch_notify(ts, NOTIFY_TOUCH_RESET, NULL);
-	}
-
-
-	t_dev_info(dev, "touch bus pm %s done\n",
-		(freeze) ? "freeze" : "suspend");
-
-	return ret;
-}
-
-int siw_touch_bus_pm_resume(struct device *dev, int thaw)
-{
-	int ret = 0;
-
-	ret = siw_touch_bus_do_pm_resume(dev);
-
-	if (thaw) {
-		siw_touch_mon_resume(dev);
-	}
-
-	t_dev_info(dev, "touch bus pm %s done\n",
-		(thaw) ? "thaw" : "resume");
-
-	return ret;
 }
 
 

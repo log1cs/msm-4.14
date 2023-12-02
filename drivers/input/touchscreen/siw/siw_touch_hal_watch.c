@@ -2,7 +2,6 @@
  * siw_touch_hal_watch.c - SiW touch hal driver for ABT
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -30,20 +29,8 @@
 
 #define __SUPPORT_WATCH_CTRL_ACCESS
 
-#define __SUPPORT_WATCH_FONT_STS_CHK
-
-/*
- * [Notice : __SUPPORT_WATCH_CTRL_ACCESS]
- * This chipset has watch function in its spec,
- * but its concept has been changed differently than before.
- * - The role for watch control including font download is mainly managed by MIPI.
- * - This watch layer supports 'config_fontdata'
- *   but this is just a kind of 'Plan B' for test or debugging
- *   when the MIPI control for font download doesn't work well.
- */
 #if defined(CONFIG_TOUCHSCREEN_SIW_SW49408)
 #undef	__SUPPORT_WATCH_CTRL_ACCESS
-#undef	__SUPPORT_WATCH_FONT_STS_CHK
 #endif
 
 #define SIW_MAX_FONT_SIZE			(6<<10)
@@ -116,13 +103,13 @@ struct ext_watch_font_header {
 	u32 size;
 };
 
-__packed struct ext_watch_query_font_data {
+struct ext_watch_query_font_data {
 	bool Font_supported;	/* 0:not supported, 1:supported */
 	u8 max_font_x_size;		/* 1~9 number X max size. */
 	u8 max_font_y_size;		/* 1~9 number Y max size. */
 	u8 max_cln_x_size;		/* ":" X max size. (ex. 23:47) */
 	u8 max_cln_y_size;		/* ":" Y max size. (ex. 23:47) */
-};
+} __packed;
 
 struct ext_watch_query_font_position {	/* 0:not supported, 1:supported */
 	bool vertical_position_supported;
@@ -134,17 +121,17 @@ struct ext_watch_query_font_time {	/* 0:not supported, 1:supported */
 	bool ampm_supported;
 };
 
-__packed struct ext_watch_query_font_color {	/* 0:not supported, 1:supported */
+struct ext_watch_query_font_color {	/* 0:not supported, 1:supported */
 	u8 max_num;		/* The number of LUT */
 	bool lut_supported;
 	bool alpha_supported;
 	bool gradation_supported;
-};
+} __packed;
 
-__packed struct ext_watch_query_font_effect {
+struct ext_watch_query_font_effect {
 	bool zero_supported;	/* 0:display off, 1:display on */
 	u8 blink_type;			/* 0:blink disable, 1:500ms, 2:1sec, 3:2sec. */
-};
+} __packed;
 
 struct ext_watch_config_font_effect_blink {
 	u32	blink_type; /* 0:off, 1:125ms, 2:250ms, 3:500ms, 4:1s, 5:2sec. 6:4s, 7:8s */
@@ -197,47 +184,47 @@ struct ext_watch_config_time_sync {	/* to sync with AP's current time */
 	u32	rtc_cwmilli;	/* for millisecond */
 };
 
-__packed struct ext_watch_bits_ctrl {	/* 0x2D2 */
+struct ext_watch_bits_ctrl {	/* 0x2D2 */
 	u32	reserved0:1;
 	u32	dispmode:1;	/* 0:U2, 1:AnyMode */
 	u32	reserved1:5;
 	u32	alpha:9;
-};
+} __packed;
 
-__packed struct ext_watch_bits_area { 	/* 0x2D3, 0x2D4 */
+struct ext_watch_bits_area { 	/* 0x2D3, 0x2D4 */
 	u32	watstart:12;
 	u32	watend:12;
-};
+} __packed;
 
-__packed struct ext_watch_bits_blink_area { /* 0x2D5 */
+struct ext_watch_bits_blink_area { /* 0x2D5 */
 	u32 bstartx:12;
 	u32 bendx:12;
-};
+} __packed;
 
-__packed struct ext_watch_bits_lut {	/* 0x2D6 */
+struct ext_watch_bits_lut {	/* 0x2D6 */
 	u8 b;
 	u8 g;
 	u8 r;
 	u8 rssvd0;
-};
+} __packed;
 
-__packed struct ext_watch_bits_time {
+struct ext_watch_bits_time {
 	u32 hour:5;
 	u32 min:6;
 	u32 sec:6;
 	u32 rsvd0:15;
-};
+} __packed;
 
-__packed struct ext_watch_cfg_mode {	/* 36 bytes */
+struct ext_watch_cfg_mode {	/* 36 bytes */
 	struct ext_watch_bits_ctrl watch_ctrl;				/* 2 bytes */
 	struct ext_watch_bits_area watch_area_x;			/* 3 bytes */
 	struct ext_watch_bits_area watch_area_y;			/* 3 bytes */
 	struct ext_watch_bits_blink_area blink_area;		/* 3 bytes */
 	struct ext_watch_bits_lut __lut[EXT_WATCH_LUT_NUM];	/* 21 bytes */
 	struct ext_watch_bits_lut *lut;
-};
+} __packed;
 
-__packed struct ext_watch_cfg_time {	/* 36 bytes */
+struct ext_watch_cfg_time {	/* 36 bytes */
 	u32 disp_waton;						/* 0xC10 watch display off:0, on:1*/
 	struct ext_watch_bits_time rtc_sct;	/* 0x081 */
 	u32 rtc_sctcnt;						/* 0x082 */
@@ -245,7 +232,7 @@ __packed struct ext_watch_cfg_time {	/* 36 bytes */
 	u32 rtc_capture;					/* 0x084 */
 	struct ext_watch_bits_time rtc_ctst;	/* 0x087 */
 	u32 rtc_ecnt;						/* 0x088 */
-};
+} __packed;
 
 enum {
 	POS_MAX_H10X	= (1<<9),
@@ -256,7 +243,7 @@ enum {
 };
 
 /* relative position in watch area */
-__packed struct ext_watch_cfg_position {	/* 0xC11 */
+struct ext_watch_cfg_position {	/* 0xC11 */
 	u32 h10x_pos:9;
 	u32 h1x_pos:9;
 	u32 reserved0:14;
@@ -281,14 +268,14 @@ __packed struct ext_watch_cfg_position {	/* 0xC11 */
 	u32 colon_width:8;
 	u32 height:8;
 	u32 font_id:8;
-};
+} __packed;
 
 static inline int __check_pos_not_set(struct ext_watch_cfg_position *position)
 {
 	return !(position->m1x_pos);
 }
 
-__packed struct ext_watch_cfg_status {	/* 0x270*/
+struct ext_watch_cfg_status {	/* 0x270*/
 	u32 step:3;
 	u32 en:1;
 	u32 en_24:1;
@@ -300,7 +287,7 @@ __packed struct ext_watch_cfg_status {	/* 0x270*/
 	u32 cur_sec:6;
 	u32 midnight_hour_zero_en:1;
 	u32 reserved0:4;
-};
+} __packed;
 
 #if defined(__SUPPORT_WATCH_CTRL_ACCESS)
 struct ext_watch_cfg {
@@ -1417,35 +1404,13 @@ static u32 ext_watch_font_crc_cal(char *data, u32 size)
 	return crc_value & 0x3FFFFFFF;
 }
 
-#if defined(__SUPPORT_WATCH_FONT_STS_CHK)
-static int ext_watch_do_chk_font_status(struct device *dev)
-{
-	struct siw_touch_chip *chip = to_touch_chip(dev);
-	struct siw_hal_reg *reg = chip->reg;
-	u32 status = 0;
-	int ret = 0;
-
-	ret = siw_hal_read_value(dev,
-				reg->tc_status,
-				&status);
-	if (ret < 0) {
-		return ret;
-	}
-
-	if (!(status & FONT_MEM_CRC)) {
-		t_watch_err(dev, "font crc fail [tc_status %08Xh]\n", status);
-		return 1;
-	}
-
-	t_watch_info(dev, "font crc ok\n");
-	return 0;
-}
-
 static int ext_watch_chk_font_status(struct device *dev)
 {
 	struct siw_touch_chip *chip = to_touch_chip(dev);
 	struct siw_ts *ts = chip->ts;
+	struct siw_hal_reg *reg = chip->reg;
 	struct watch_data *watch = (struct watch_data *)chip->watch;
+	u32 status = 1;
 	int ret = 0;
 
 	if (siw_touch_boot_mode_check(dev) >= MINIOS_MFTS_FOLDER) {
@@ -1457,52 +1422,40 @@ static int ext_watch_chk_font_status(struct device *dev)
 		return -EBUSY;
 
 	case FONT_DOWNLOADING :
-		mod_delayed_work(ts->wq, &chip->font_download_work,
-			msecs_to_jiffies(20));
+		mod_delayed_work(ts->wq, &chip->font_download_work, 0);
 		return 0;
 	}
 
-	ret = ext_watch_do_chk_font_status(dev);
-	if (ret == 1) {
-		mod_delayed_work(ts->wq, &chip->font_download_work,
-			msecs_to_jiffies(20));
+	ret = siw_hal_read_value(dev,
+				reg->tc_status,
+				&status);
+	if (ret < 0) {
+		/* */
+	}
+	if (!(status & FONT_MEM_CRC)) {
+		t_watch_err(dev, "crc fail [tc_status %08Xh]\n", status);
+		mod_delayed_work(ts->wq, &chip->font_download_work, 0);
 		goto out;
 	}
+
+	t_watch_info(dev, "crc ok\n");
 
 out:
 	return ret;
 }
-#else	/* __SUPPORT_WATCH_FONT_STS_CHK */
-static int ext_watch_chk_font_status(struct device *dev)
-{
-	return 0;
-}
-
-#define ext_watch_do_chk_font_status	ext_watch_chk_font_status
-#endif	/* __SUPPORT_WATCH_FONT_STS_CHK */
 
 enum {
 	FONT_TYPE_0 = 0,
 	FONT_TYPE_1,
 };
 
-#define FONT_DN_WORK_MSG	"font dn work(%d): "
-
-#define t_watch_info_font_dn_x(_dev, fmt, _idx, args...)	\
-		t_watch_info(_dev, FONT_DN_WORK_MSG fmt, _idx, ##args)
+#define FONT_DN_WORK_MSG_0	"font dn work(0): "
+#define FONT_DN_WORK_MSG_1	"font dn work(1): "
 
 #define t_watch_info_font_dn_0(_dev, fmt, args...)	\
-		t_watch_info_font_dn_x(_dev, fmt, 0, ##args)
+		t_watch_info(_dev, FONT_DN_WORK_MSG_0 fmt, ##args)
 #define t_watch_info_font_dn_1(_dev, fmt, args...)	\
-		t_watch_info_font_dn_x(_dev, fmt, 1, ##args)
-
-#define t_watch_err_font_dn_x(_dev, fmt, _idx, args...)	\
-		t_watch_err(_dev, FONT_DN_WORK_MSG fmt, _idx, ##args)
-
-#define t_watch_err_font_dn_0(_dev, fmt, args...)	\
-		t_watch_err_font_dn_x(_dev, fmt, 0, ##args)
-#define t_watch_err_font_dn_1(_dev, fmt, args...)	\
-		t_watch_err_font_dn_x(_dev, fmt, 1, ##args)
+		t_watch_info(_dev, FONT_DN_WORK_MSG_1 fmt, ##args)
 
 static int ext_watch_font_dn_type_0(struct device *dev)
 {
@@ -1538,7 +1491,7 @@ static int ext_watch_font_dn_type_0(struct device *dev)
 		magic_addr);
 
 	if (magic_addr > watch->font_written_size) {
-		t_watch_err_font_dn_0(dev, "wrong magic addr, %08Xh\n", magic_addr);
+		t_watch_err(dev, "wrong magic addr, %08Xh\n", magic_addr);
 		goto out;
 	}
 
@@ -1546,7 +1499,7 @@ static int ext_watch_font_dn_type_0(struct device *dev)
 		(void *)&ext_wdata->font_data[magic_addr], sizeof(u32));
 
 	if (font_hdr->magic_code != watch->font_magic_code) {
-		t_watch_err_font_dn_0(dev, "wrong magic code: %08Xh (%08Xh)\n",
+		t_watch_err(dev, "wrong magic code: %08Xh (%08Xh)\n",
 			font_hdr->magic_code, watch->font_magic_code);
 		goto out;
 	}
@@ -1569,7 +1522,7 @@ static int ext_watch_font_dn_type_0(struct device *dev)
 		crc_file, crc_addr);
 
 	ext_wdata->font_crc =
-		ext_watch_font_crc_cal(ext_wdata->font_data, crc_addr);
+		ext_watch_font_crc_cal(ext_wdata->font_data, font_hdr->size);
 	t_watch_info_font_dn_0(dev,
 		"result crc %08Xh\n",
 		ext_wdata->font_crc);
@@ -1643,13 +1596,11 @@ static int ext_watch_font_dn_type_0(struct device *dev)
 		offset += (curr_size>>2);
 	}
 
-#if defined(__SUPPORT_WATCH_FONT_STS_CHK)
 	ret = siw_hal_write_value(dev,
 				reg->ext_watch_font_crc, 1);
 	if (ret < 0) {
 		goto out;
 	}
-#endif
 
 	atomic_set(&watch->state.font_status, FONT_READY);
 
@@ -1669,7 +1620,9 @@ static int ext_watch_font_dn_type_0(struct device *dev)
 out:
 	atomic_set(&watch->state.font_status, FONT_EMPTY);
 
-	t_watch_err_font_dn_0(dev, "failed, %d\n", ret);
+	t_watch_err(dev,
+		FONT_DN_WORK_MSG_0 "failed, %d\n",
+		ret);
 
 	return ret;
 }
@@ -1695,7 +1648,7 @@ static int ext_watch_font_dn_type_1(struct device *dev)
 	font_hdr = (struct ext_watch_font_header *)watch->ext_wdata.font_data;
 
 	if (font_hdr->magic_code != watch->font_magic_code) {
-		t_watch_err_font_dn_1(dev, "wrong magic code: %08Xh (%08Xh)\n",
+		t_watch_err(dev, "wrong magic code: %08Xh (%08Xh)\n",
 			font_hdr->magic_code, watch->font_magic_code);
 		goto out;
 	}
@@ -1756,13 +1709,11 @@ static int ext_watch_font_dn_type_1(struct device *dev)
 		offset += (curr_size>>2);
 	}
 
-#if defined(__SUPPORT_WATCH_FONT_STS_CHK)
 	ret = siw_hal_write_value(dev,
 				reg->ext_watch_font_crc, 1);
 	if (ret < 0) {
 		goto out;
 	}
-#endif
 
 	atomic_set(&watch->state.font_status, FONT_READY);
 
@@ -1782,7 +1733,9 @@ static int ext_watch_font_dn_type_1(struct device *dev)
 out:
 	atomic_set(&watch->state.font_status, FONT_EMPTY);
 
-	t_watch_err_font_dn_1(dev, "failed, %d\n", ret);
+	t_watch_err(dev,
+		FONT_DN_WORK_MSG_1 "failed, %d\n",
+		ret);
 
 	return ret;
 }
@@ -1836,10 +1789,6 @@ static void ext_watch_font_download(struct work_struct *font_download_work)
 		ext_watch_font_dn_type_0(dev);
 		break;
 	}
-
-	touch_msleep(5);
-
-	ext_watch_do_chk_font_status(dev);
 
 out:
 	mutex_unlock(&ts->reset_lock);
@@ -2991,7 +2940,7 @@ static ssize_t ext_watch_access_write(struct file *filp, struct kobject *kobj,
 	}
 
 	if ((off + count) > watch->font_max_size)	 {
-		t_watch_err(dev, "access_write: size overflow : offset[%d] size[%d]\n",
+		t_watch_err(dev, "access_read: size overflow : offset[%d] size[%d]\n",
 			(int)off, (int)count);
 		atomic_set(&watch->state.font_status, FONT_EMPTY);
 		ret = -EOVERFLOW;
@@ -3181,7 +3130,7 @@ static const struct siw_watch_type_table watch_type_tables[] = {
 		.flag = WATCH_FLAG_SKIP_FOR_SW49407,
 		.win_fixed = (struct reset_area *)&watch_win_fixed_sw49407,
 		.font_type = FONT_TYPE_1,
-		.font_max_size = ((45<<10) + 962),		//45.94KB
+		.font_max_size = ((42<<10)+(1<<9)),		//42.5KB
 		.font_crc_offset = 16,
 		.font_magic_code = SIW_FONT_MAGIC_CODE,
 		.dcst_offset = 0x085,	//dcst_reg_oft
@@ -3204,7 +3153,6 @@ static const struct siw_watch_type_table watch_type_tables[] = {
 		.font_crc_offset = 12,
 		.font_magic_code = SIW_FONT_MAGIC_CODE,
 	},
-#if 0
 	{	.chip_type = CHIP_SW49408,
 		.watch_type = (WATCH_TYPE_1 | (1<<16)),
 		.flag = 0,
@@ -3213,7 +3161,6 @@ static const struct siw_watch_type_table watch_type_tables[] = {
 		.font_crc_offset = 16,
 		.font_magic_code = SIW_FONT_MAGIC_CODE,
 	},
-#endif
 	/* */
 	{ CHIP_NONE, 0, },	//End mark
 };
@@ -3516,13 +3463,8 @@ void siw_hal_watch_rtc_on(struct device *dev)
 {
 	struct siw_touch_chip *chip = to_touch_chip(dev);
 	struct watch_data *watch = (struct watch_data *)chip->watch;
-	int watch_type;
+	int watch_type = WATCH_TYPE(watch);
 	int rtc_on = 0;
-
-	if (watch == NULL)
-		return;
-
-	watch_type = WATCH_TYPE(watch);
 
 	switch (watch_type) {
 	case WATCH_TYPE_1:
@@ -3532,7 +3474,7 @@ void siw_hal_watch_rtc_on(struct device *dev)
 		break;
 	}
 
-	if (rtc_on) {
+	if (watch && rtc_on) {
 		if (atomic_read(&watch->state.rtc_status) == RTC_CLEAR) {
 			ext_watch_rtc_start(dev, EXT_WATCH_RTC_START);
 		}

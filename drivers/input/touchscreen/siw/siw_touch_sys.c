@@ -2,7 +2,6 @@
  * siw_touch_sys.c - SiW touch system interface
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -195,82 +194,4 @@ int siw_touch_sys_osc(struct device *dev, int onoff)
 	return 0;
 }
 
-#if defined(__SIW_SUPPORT_DRM_TYPE_1)
-static int drm_notifier_callback(
-			struct notifier_block *self,
-			unsigned long event, void *data)
-{
-	struct siw_ts *ts =
-		container_of(self, struct siw_ts, user_fb_notif);
-	struct device *dev = ts->dev;
-	struct drm_ext_event *ev = (struct drm_ext_event *)data;
-	int *blank;
-
-	if (!ev || !ev->data) {
-		return 0;
-	}
-
-	blank = (int *)ev->data;
-
-#if defined(__SIW_CONFIG_SYSTEM_PM)
-	if (event == DRM_EXT_EVENT_BEFORE_BLANK) {
-		if (*blank == DRM_BLANK_UNBLANK) {
-			t_dev_info(dev, "drm_unblank(early)\n");
-		} else if (*blank == DRM_BLANK_POWERDOWN) {
-			t_dev_info(dev, "drm_blank(early)\n");
-			siw_touch_suspend_call(dev);
-		}
-	}
-
-	if (event == DRM_EXT_EVENT_AFTER_BLANK) {
-		if (*blank == DRM_BLANK_UNBLANK) {
-			t_dev_info(dev, "drm_unblank\n");
-			siw_touch_resume_call(dev);
-		} else if (*blank == DRM_BLANK_POWERDOWN) {
-			t_dev_info(dev, "drm_blank\n");
-		}
-	}
-#else	/* __SIW_CONFIG_SYSTEM_PM */
-	if (event == DRM_EXT_EVENT_AFTER_BLANK) {
-		if (*blank == DRM_BLANK_UNBLANK) {
-			t_dev_info(dev, "drm_unblank\n");
-			siw_touch_resume_call(dev);
-		} else if (*blank == DRM_BLANK_POWERDOWN) {
-			t_dev_info(dev, "drm_blank\n");
-			siw_touch_suspend_call(dev);
-		}
-	}
-#endif	/* __SIW_CONFIG_SYSTEM_PM */
-
-	return 0;
-}
-#endif	/* __SIW_SUPPORT_DRM_TYPE_1 */
-
-int siw_touch_sys_fb_register_client(struct device *dev)
-{
-#if defined(__SIW_SUPPORT_DRM_TYPE_1)
-	struct siw_ts *ts = to_touch_core(dev);
-
-	t_dev_info(dev, "drm_register_client - user_fb_notif\n");
-
-	ts->user_fb_notif.notifier_call = drm_notifier_callback;
-
-	return drm_register_client(&ts->user_fb_notif);
-#else
-	return 0;
-#endif
-}
-
-int siw_touch_sys_fb_unregister_client(struct device *dev)
-{
-#if defined(__SIW_SUPPORT_DRM_TYPE_1)
-	struct siw_ts *ts = to_touch_core(dev);
-
-	t_dev_info(dev, "drm_unregister_client - user_fb_notif\n");
-
-	return drm_unregister_client(&ts->user_fb_notif);
-#else
-	return 0;
-#endif
-}
 

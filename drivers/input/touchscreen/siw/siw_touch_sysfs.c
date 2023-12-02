@@ -2,7 +2,6 @@
  * siw_touch_sysfs.c - SiW touch sysfs driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -48,14 +47,12 @@ static const char *siw_ime_str[] = {
 };
 #endif
 
-#if defined(__SIW_CONFIG_KNOCK)
 static const char *siw_mfts_str[] = {
 	"NONE",
 	"FOLDER",
 	"FLAT",
 	"CURVED",
 };
-#endif
 
 #if defined(__SIW_SUPPORT_ASC)
 static const char *siw_incoming_call_str[] = {
@@ -120,8 +117,6 @@ static ssize_t _show_do_plat_data(struct device *dev, char *buf)
 	size += siw_snprintf(buf, size, "=== Platform Data ===\n");
 	size += _plat_data_snprintf(buf, size,
 					"reset_pin", touch_reset_pin(ts));
-	size += _plat_data_snprintf(buf, size,
-					"reset_pin_pol", touch_reset_pin_pol(ts));
 	size += _plat_data_snprintf(buf, size,
 					"irq_pin", touch_irq_pin(ts));
 	size += _plat_data_snprintf(buf, size,
@@ -235,27 +230,19 @@ static ssize_t _show_upgrade(struct device *dev, char *buf)
 	return 0;
 }
 
-#if defined(__SIW_CONFIG_KNOCK)
 static int __show_do_lpwg_data(struct device *dev, char *buf)
 {
 	struct siw_ts *ts = to_touch_core(dev);
-	struct lpwg_info *lpwg = &ts->lpwg;
 	int i;
 	int size = 0;
 
 	for (i = 0; i < MAX_LPWG_CODE; i++) {
-		if ((lpwg->code[i].x == -1) && (lpwg->code[i].y == -1)) {
+		if (ts->lpwg.code[i].x == -1 && ts->lpwg.code[i].y == -1)
 			break;
-		}
-
 		size += siw_snprintf(buf, size, "%d %d\n",
-				lpwg->code[i].x, lpwg->code[i].y);
-
-		if (!lpwg->code[i].x && !lpwg->code[i].y) {
-			break;
-		}
+				ts->lpwg.code[i].x, ts->lpwg.code[i].y);
 	}
-	memset(lpwg->code, 0, sizeof(struct point) * MAX_LPWG_CODE);
+	memset(ts->lpwg.code, 0, sizeof(struct point) * MAX_LPWG_CODE);
 
 	return size;
 }
@@ -303,6 +290,7 @@ static ssize_t _store_lpwg_notify(struct device *dev,
 	int code = 0;
 	int param[4] = {0, };
 	int mfts_mode = 0;
+	t_dev_info(dev, "%s, %d\n", __func__, __LINE__);
 
 	mfts_mode = siw_touch_boot_mode_check(dev);
 	if ((mfts_mode >= MINIOS_MFTS_FOLDER) && !ts->role.mfts_lpwg)
@@ -328,16 +316,6 @@ static ssize_t _store_lpwg_notify(struct device *dev,
 	case LPWG_SENSOR_STATUS:
 		goto out;
 	default:
-		if ((code >= LPWG_EXT_TCI_INFO_STORE) &&
-			(code < LPWG_EXT_STORE_END)) {
-			break;
-		}
-
-		if ((code >= LPWG_EXT_TCI_INFO_SHOW) &&
-			(code < LPWG_EXT_SHOW_END)) {
-			break;
-		}
-
 		if (code > LPWG_REPLY) {
 			t_dev_err(dev, "unknown code, %d\n", code);
 			goto out;
@@ -352,72 +330,6 @@ static ssize_t _store_lpwg_notify(struct device *dev,
 out:
 	return count;
 }
-
-static ssize_t _show_mfts_state(struct device *dev, char *buf)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	int value = 0;
-	int size = 0;
-
-	value = atomic_read(&ts->state.mfts);
-
-	size += siw_snprintf(buf, size, "%s : %s(%d)\n",
-				__func__,
-				siw_mfts_str[value], value);
-
-	return (ssize_t)size;
-}
-
-static ssize_t _store_mfts_state(struct device *dev,
-				const char *buf, size_t count)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	int value = 0;
-
-	if (sscanf(buf, "%d", &value) <= 0) {
-		siw_sysfs_err_invalid_param(dev);
-		return count;
-	}
-
-	if (value >= MFTS_NONE && value <= MFTS_CURVED) {
-		atomic_set(&ts->state.mfts, value);
-		t_dev_info(dev, "MFTS : %s(%d)\n", siw_mfts_str[value], value);
-	} else {
-		t_dev_info(dev, "MFTS : Unknown state, %d\n", value);
-	}
-
-	return count;
-}
-
-static ssize_t _show_mfts_lpwg(struct device *dev, char *buf)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	int size = 0;
-
-	size += siw_snprintf(buf, size, "MFTS LPWG : %d\n",
-				ts->role.use_lpwg_test);
-
-	return (ssize_t)size;
-}
-
-static ssize_t _store_mfts_lpwg(struct device *dev,
-				const char *buf, size_t count)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	int value = 0;
-
-	if (sscanf(buf, "%d", &value) <= 0) {
-		siw_sysfs_err_invalid_param(dev);
-		return count;
-	}
-
-	ts->role.mfts_lpwg = value;
-	t_mfts_lpwg = value;
-	t_dev_info(dev, "MFTS LPWG : %d\n", ts->role.mfts_lpwg);
-
-	return count;
-}
-#endif	/* __SIW_CONFIG_KNOCK */
 
 #if defined(__SYS_USE_LOCKSCREEN)
 static ssize_t _show_lockscreen_state(struct device *dev, char *buf)
@@ -519,58 +431,27 @@ static ssize_t _show_quick_cover_state(struct device *dev, char *buf)
 	size += siw_snprintf(buf, size, "Qcover : %s(%d)\n",
 				value ? "CLOSE" : "OPEN", value);
 
-	value = atomic_read(&ts->state.quick_cover_opt);
-
-	size += siw_snprintf(buf, size, "Qcover opt: %s(%d)\n",
-				(value & QUICKCOVER_OPT_BIT_SKIP_CLOSE) ? "skip" : "pass", value);
-
 	return (ssize_t)size;
 }
 
 static ssize_t _store_quick_cover_state(struct device *dev,
 				const char *buf, size_t count)
 {
-	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
+	struct siw_ts *ts = to_touch_core(dev);
 
 	if (sscanf(buf, "%d", &value) <= 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
 
-	mutex_lock(&ts->lock);
-
-	switch (value) {
-	case QUICKCOVER_OPEN:
-	case QUICKCOVER_CLOSE:
+	if (value == QUICKCOVER_CLOSE || value == QUICKCOVER_OPEN) {
 		atomic_set(&ts->state.quick_cover, value);
-		t_dev_info(dev, "Qcover : %s(%d)\n", (value) ? "CLOSE" : "OPEN", value);
-		break;
-	case QUICKCOVER_OPT_BASE:
-	case (QUICKCOVER_OPT_BASE+1):
-		{
-			int opt = atomic_read(&ts->state.quick_cover_opt);
-			int sel = value - QUICKCOVER_OPT_BASE;
-
-			switch (sel) {
-			case 0:
-				opt &= ~QUICKCOVER_OPT_BIT_SKIP_CLOSE;
-				break;
-			case 1:
-				opt |= QUICKCOVER_OPT_BIT_SKIP_CLOSE;
-				break;
-			}
-			atomic_set(&ts->state.quick_cover_opt, opt);
-			t_dev_info(dev, "Qcover opt: %s(%d)\n",
-				(opt & QUICKCOVER_OPT_BIT_SKIP_CLOSE) ? "skip" : "pass", opt);
-		}
-		break;
-	default:
+		t_dev_info(dev, "Qcover : %s(%d)\n",
+			value ? "CLOSE" : "OPEN", value);
+	} else {
 		t_dev_info(dev, "Qcover : Unknown state, %d\n", value);
-		break;
 	}
-
-	mutex_unlock(&ts->lock);
 
 	return count;
 }
@@ -583,6 +464,71 @@ static ssize_t _show_version_info(struct device *dev, char *buf)
 static ssize_t _show_atcmd_version_info(struct device *dev, char *buf)
 {
 	return siw_touch_get(dev, CMD_ATCMD_VERSION, buf);
+}
+
+static ssize_t _show_mfts_state(struct device *dev, char *buf)
+{
+	struct siw_ts *ts = to_touch_core(dev);
+	int value = 0;
+	int size = 0;
+
+	value = atomic_read(&ts->state.mfts);
+
+	size += siw_snprintf(buf, size, "%s : %s(%d)\n",
+				__func__,
+				siw_mfts_str[value], value);
+
+	return (ssize_t)size;
+}
+
+static ssize_t _store_mfts_state(struct device *dev,
+				const char *buf, size_t count)
+{
+	struct siw_ts *ts = to_touch_core(dev);
+	int value = 0;
+
+	if (sscanf(buf, "%d", &value) <= 0) {
+		siw_sysfs_err_invalid_param(dev);
+		return count;
+	}
+
+	if (value >= MFTS_NONE && value <= MFTS_CURVED) {
+		atomic_set(&ts->state.mfts, value);
+		t_dev_info(dev, "MFTS : %s(%d)\n", siw_mfts_str[value], value);
+	} else {
+		t_dev_info(dev, "MFTS : Unknown state, %d\n", value);
+	}
+
+	return count;
+}
+
+static ssize_t _show_mfts_lpwg(struct device *dev, char *buf)
+{
+	struct siw_ts *ts = to_touch_core(dev);
+	int size = 0;
+
+	size += siw_snprintf(buf, size, "MFTS LPWG : %d\n",
+				ts->role.use_lpwg_test);
+
+	return (ssize_t)size;
+}
+
+static ssize_t _store_mfts_lpwg(struct device *dev,
+				const char *buf, size_t count)
+{
+	struct siw_ts *ts = to_touch_core(dev);
+	int value = 0;
+
+	if (sscanf(buf, "%d", &value) <= 0) {
+		siw_sysfs_err_invalid_param(dev);
+		return count;
+	}
+
+	ts->role.mfts_lpwg = value;
+	t_mfts_lpwg = value;
+	t_dev_info(dev, "MFTS LPWG : %d\n", ts->role.mfts_lpwg);
+
+	return count;
 }
 
 static ssize_t _show_sp_link_touch_off(struct device *dev, char *buf)
@@ -920,7 +866,6 @@ static ssize_t _show_module_info(struct device *dev, char *buf)
 }
 
 u32 __weak t_mon_dbg_mask;	//instead of using extern
-u32 __weak t_bus_dbg_mask;	//instead of using extern
 
 static ssize_t _show_dbg_mask(struct device *dev, char *buf)
 {
@@ -928,13 +873,8 @@ static ssize_t _show_dbg_mask(struct device *dev, char *buf)
 	int size = 0;
 
 	size += siw_snprintf(buf, size,
-				"t_dev_dbg_mask %08Xh\n", t_dev_dbg_mask);
-	size += siw_snprintf(buf, size,
-				"t_pr_dbg_mask  %08Xh\n", t_pr_dbg_mask);
-	size += siw_snprintf(buf, size,
-				"t_mon_dbg_mask %08Xh\n", t_mon_dbg_mask);
-	size += siw_snprintf(buf, size,
-				"t_bus_dbg_mask %08Xh\n", t_bus_dbg_mask);
+				"t_dev_dbg_mask %08Xh, t_pr_dbg_mask %08Xh, t_mon_dbg_mask %08Xh\n\n",
+				t_dev_dbg_mask, t_pr_dbg_mask, t_mon_dbg_mask);
 
 	size += siw_snprintf(buf, size,
 				"Usage:\n");
@@ -944,8 +884,6 @@ static ssize_t _show_dbg_mask(struct device *dev, char *buf)
 				" t_pr_dbg_mask  : echo 1 {mask_value} > dbg_mask\n");
 	size += siw_snprintf(buf, size,
 				" t_mon_dbg_mask : echo 2 {mask_value} > dbg_mask\n");
-	size += siw_snprintf(buf, size,
-				" t_bus_dbg_mask : echo 3 {mask_value} > dbg_mask\n");
 
 	return (ssize_t)size;
 }
@@ -956,7 +894,6 @@ static void _store_dbg_mask_usage(struct device *dev)
 	t_dev_info(dev, " t_dev_dbg_mask : echo 0 {mask_value(hex)} > dbg_mask\n");
 	t_dev_info(dev, " t_pr_dbg_mask  : echo 1 {mask_value(hex)} > dbg_mask\n");
 	t_dev_info(dev, " t_mon_dbg_mask : echo 2 {mask_value(hex)} > dbg_mask\n");
-	t_dev_info(dev, " t_bus_dbg_mask : echo 3 {mask_value(hex)} > dbg_mask\n");
 }
 
 static ssize_t _store_dbg_mask(struct device *dev,
@@ -993,12 +930,6 @@ static ssize_t _store_dbg_mask(struct device *dev,
 		if (!(touch_flags(ts) & TOUCH_USE_MON_THREAD)) {
 			t_dev_info(dev, "(but, mon thread not activated)\n");
 		}
-		break;
-	case 3 :
-		old_value = t_bus_dbg_mask;
-		t_bus_dbg_mask = new_value;
-		t_dev_info(dev, "t_bus_dbg_mask changed : %08Xh -> %08xh\n",
-			old_value, new_value);
 		break;
 	default :
 		_store_dbg_mask_usage(dev);
@@ -1082,7 +1013,7 @@ static ssize_t _store_irq_flag(struct device *dev,
 static ssize_t _store_init_late(struct device *dev,
 				const char *buf, size_t count)
 {
-//	struct siw_ts *ts = to_touch_core(dev);
+	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
 
 	if (sscanf(buf, "%X", &value) <= 0) {
@@ -1094,9 +1025,7 @@ static ssize_t _store_init_late(struct device *dev,
 		goto out;
 	}
 
-	siw_touch_atomic_notifier_call(
-		LCD_EVENT_TOUCH_INIT_LATE,
-		&value);
+	siw_touch_init_late(ts);
 
 out:
 	return count;
@@ -1126,61 +1055,6 @@ static ssize_t _store_dbg_notify(struct device *dev,
 		(unsigned long)event, (void *)&data);
 
 out:
-	return count;
-}
-
-static ssize_t _show_dbg_mon(struct device *dev, char *buf)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	struct siw_ts_thread *ts_thread = &ts->mon_thread;
-	const char *name = NULL;
-	int size = 0;
-
-	if (!(touch_flags(ts) & TOUCH_USE_MON_THREAD)) {
-		size += siw_snprintf(buf, size, "mon thread not enabled\n");
-		return (ssize_t)size;
-	}
-
-	name = (atomic_read(&ts_thread->state) == TS_THREAD_ON) ? "resume" : "pause";
-
-	size += siw_snprintf(buf, size, "mon thread is %s state\n", name);
-
-	size += siw_snprintf(buf, size, "\nUsage:\n");
-	size += siw_snprintf(buf, size, " pause  : echo 1 > dbg_mon\n");
-	size += siw_snprintf(buf, size, " resume : echo 0 > dbg_mon\n");
-
-	return (ssize_t)size;
-}
-
-static ssize_t _store_dbg_mon(struct device *dev,
-				const char *buf, size_t count)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	struct siw_touch_chip *chip = NULL;
-	int pause = 0;
-
-	if (!(touch_flags(ts) & TOUCH_USE_MON_THREAD)) {
-		t_dev_info(dev, "mon thread not enabled\n");
-		return count;
-	}
-
-	if (sscanf(buf, "%d", &pause) <= 0) {
-		siw_sysfs_err_invalid_param(dev);
-		return count;
-	}
-
-	chip = to_touch_chip(dev);
-
-	if (chip->driving_mode != LCD_MODE_U3) {
-		t_dev_info(dev, "can be controlled only in U3\n");
-		return count;
-	}
-
-	if (pause)
-		siw_touch_mon_pause(dev);
-	else
-		siw_touch_mon_resume(dev);
-
 	return count;
 }
 
@@ -1229,7 +1103,7 @@ static ssize_t __show_g_state(struct device *dev, char *buf,
 	int size = 0;
 
 	size += siw_snprintf(buf, size, "%s chk: %s(%08Xh)\n",
-				name, (value & 0x1) ? "ON" : "OFF", value);
+				name, (value % 0x1) ? "ON" : "OFF", value);
 
 	return (ssize_t)size;
 }
@@ -1242,7 +1116,7 @@ static ssize_t __store_g_state(struct device *dev,
 
 	if (sscanf(buf, "%X", &value) <= 0) {
 		siw_sysfs_err_invalid_param(dev);
-		return -EINVAL;
+		return count;
 	}
 
 	t_dev_dbg_base(dev, "%s set: %s(%08Xh)\n",
@@ -1277,7 +1151,7 @@ static ssize_t _store_glove_state(struct device *dev,
 		mutex_unlock(&ts->lock);
 	}
 
-	return (ssize_t)count;
+	return (ssize_t)ret;
 }
 
 static ssize_t _show_grab_state(struct device *dev, char *buf)
@@ -1303,7 +1177,7 @@ static ssize_t _store_grab_state(struct device *dev,
 		mutex_unlock(&ts->lock);
 	}
 
-	return (ssize_t)count;
+	return (ssize_t)ret;
 }
 
 ssize_t __weak show_sys_con(struct device *dev, char *buf)
@@ -1332,19 +1206,11 @@ static SIW_TOUCH_ATTR(driver_data,
 static SIW_TOUCH_ATTR(fw_upgrade,
 						_show_upgrade,
 						_store_upgrade);
-#if defined(__SIW_CONFIG_KNOCK)
 static SIW_TOUCH_ATTR(lpwg_data,
 						_show_lpwg_data,
 						_store_lpwg_data);
 static SIW_TOUCH_ATTR(lpwg_notify, NULL,
 						_store_lpwg_notify);
-static SIW_TOUCH_ATTR(mfts,
-						_show_mfts_state,
-						_store_mfts_state);
-static SIW_TOUCH_ATTR(mfts_lpwg,
-						_show_mfts_lpwg,
-						_store_mfts_lpwg);
-#endif	/* __SIW_CONFIG_KNOCK */
 #if defined(__SYS_USE_LOCKSCREEN)
 static SIW_TOUCH_ATTR(keyguard,
 						_show_lockscreen_state,
@@ -1364,6 +1230,12 @@ static SIW_TOUCH_ATTR(version,
 						_show_version_info, NULL);
 static SIW_TOUCH_ATTR(testmode_ver,
 						_show_atcmd_version_info, NULL);
+static SIW_TOUCH_ATTR(mfts,
+						_show_mfts_state,
+						_store_mfts_state);
+static SIW_TOUCH_ATTR(mfts_lpwg,
+						_show_mfts_lpwg,
+						_store_mfts_lpwg);
 static SIW_TOUCH_ATTR(sp_link_touch_off,
 						_show_sp_link_touch_off,
 						_store_sp_link_touch_off);
@@ -1407,9 +1279,6 @@ static SIW_TOUCH_ATTR(init_late, NULL,
 						_store_init_late);
 static SIW_TOUCH_ATTR(dbg_notify, NULL,
 						_store_dbg_notify);
-static SIW_TOUCH_ATTR(dbg_mon,
-						_show_dbg_mon,
-						_store_dbg_mon);
 static SIW_TOUCH_ATTR(dbg_test, NULL,
 						_store_dbg_test);
 static SIW_TOUCH_ATTR(glove_status,
@@ -1422,29 +1291,13 @@ static SIW_TOUCH_ATTR(sys_con,
 						show_sys_con,
 						store_sys_con);
 
+
 static struct attribute *siw_touch_attribute_list[] = {
 	&_SIW_TOUCH_ATTR_T(platform_data).attr,
 	&_SIW_TOUCH_ATTR_T(driver_data).attr,
-	&_SIW_TOUCH_ATTR_T(module_info).attr,
-	&_SIW_TOUCH_ATTR_T(dbg_mask).attr,
-	&_SIW_TOUCH_ATTR_T(dbg_flag).attr,
-	&_SIW_TOUCH_ATTR_T(init_late).attr,
-	&_SIW_TOUCH_ATTR_T(dbg_notify).attr,
-	NULL,
-};
-
-static const struct attribute_group siw_touch_attribute_group = {
-	.attrs = siw_touch_attribute_list,
-};
-
-static struct attribute *siw_touch_attribute_list_normal[] = {
 	&_SIW_TOUCH_ATTR_T(fw_upgrade).attr,
-#if defined(__SIW_CONFIG_KNOCK)
 	&_SIW_TOUCH_ATTR_T(lpwg_data).attr,
 	&_SIW_TOUCH_ATTR_T(lpwg_notify).attr,
-	&_SIW_TOUCH_ATTR_T(mfts).attr,
-	&_SIW_TOUCH_ATTR_T(mfts_lpwg).attr,
-#endif	/* __SIW_CONFIG_KNOCK */
 #if defined(__SYS_USE_LOCKSCREEN)
 	&_SIW_TOUCH_ATTR_T(keyguard.attr),
 #endif	/* __SYS_USE_LOCKSCREEN */
@@ -1455,10 +1308,11 @@ static struct attribute *siw_touch_attribute_list_normal[] = {
 	&_SIW_TOUCH_ATTR_T(firmware).attr,
 	&_SIW_TOUCH_ATTR_T(version).attr,
 	&_SIW_TOUCH_ATTR_T(testmode_ver).attr,
+	&_SIW_TOUCH_ATTR_T(mfts).attr,
+	&_SIW_TOUCH_ATTR_T(mfts_lpwg).attr,
 	&_SIW_TOUCH_ATTR_T(sp_link_touch_off).attr,
 	&_SIW_TOUCH_ATTR_T(irq_state).attr,
 	&_SIW_TOUCH_ATTR_T(irq_level).attr,
-	&_SIW_TOUCH_ATTR_T(irq_flag).attr,
 	&_SIW_TOUCH_ATTR_T(debug_tool).attr,
 	&_SIW_TOUCH_ATTR_T(debug_tool_t).attr,
 	&_SIW_TOUCH_ATTR_T(debug_option).attr,
@@ -1467,7 +1321,12 @@ static struct attribute *siw_touch_attribute_list_normal[] = {
 	&_SIW_TOUCH_ATTR_T(asc).attr,
 	&_SIW_TOUCH_ATTR_T(onhand).attr,
 #endif	/* __SIW_SUPPORT_ASC */
-	&_SIW_TOUCH_ATTR_T(dbg_mon).attr,
+	&_SIW_TOUCH_ATTR_T(module_info).attr,
+	&_SIW_TOUCH_ATTR_T(dbg_mask).attr,
+	&_SIW_TOUCH_ATTR_T(dbg_flag).attr,
+	&_SIW_TOUCH_ATTR_T(irq_flag).attr,
+	&_SIW_TOUCH_ATTR_T(init_late).attr,
+	&_SIW_TOUCH_ATTR_T(dbg_notify).attr,
 	&_SIW_TOUCH_ATTR_T(dbg_test).attr,
 	&_SIW_TOUCH_ATTR_T(glove_status).attr,
 	&_SIW_TOUCH_ATTR_T(grab_status).attr,
@@ -1475,20 +1334,8 @@ static struct attribute *siw_touch_attribute_list_normal[] = {
 	NULL,
 };
 
-static const struct attribute_group siw_touch_attribute_group_normal = {
-	.attrs = siw_touch_attribute_list_normal,
-};
-
-static struct attribute *siw_touch_attribute_list_charger[] = {
-#if defined(__SIW_CONFIG_KNOCK)
-	&_SIW_TOUCH_ATTR_T(mfts).attr,
-	&_SIW_TOUCH_ATTR_T(mfts_lpwg).attr,
-#endif
-	NULL,
-};
-
-static const struct attribute_group siw_touch_attribute_group_charger = {
-	.attrs = siw_touch_attribute_list_charger,
+static const struct attribute_group siw_touch_attribute_group = {
+	.attrs = siw_touch_attribute_list,
 };
 
 static ssize_t siw_touch_attr_show(struct kobject *kobj,
@@ -1533,6 +1380,15 @@ static struct kobj_type siw_touch_kobj_type = {
 	.sysfs_ops = &siw_touch_sysfs_ops,
 };
 
+int __weak siw_touch_misc_init(struct device *dev)
+{
+	return 0;
+}
+
+void __weak siw_touch_misc_free(struct device *dev)
+{
+
+}
 
 int siw_touch_init_sysfs(struct siw_ts *ts)
 {
@@ -1557,11 +1413,22 @@ int siw_touch_init_sysfs(struct siw_ts *ts)
 
 	ret = sysfs_create_group(kobj, &siw_touch_attribute_group);
 	if (ret < 0) {
-		t_dev_err(dev, "failed to add sysfs(initial)\n");
+		t_dev_err(dev, "failed to create sysfs\n");
 		goto out_sys;
 	}
 
+	ret = siw_ops_sysfs(ts, DRIVER_INIT);
+	if (ret < 0) {
+		t_dev_err(dev, "failed to register sysfs\n");
+		goto out_sysfs;
+	}
+
+	siw_touch_misc_init(dev);
+
 	return 0;
+
+out_sysfs:
+	sysfs_remove_group(kobj, &siw_touch_attribute_group);
 
 out_sys:
 	kobject_del(kobj);
@@ -1580,137 +1447,12 @@ void siw_touch_free_sysfs(struct siw_ts *ts)
 		return;
 	}
 
+	siw_touch_misc_free(dev);
+
+	siw_ops_sysfs(ts, DRIVER_FREE);
+
 	sysfs_remove_group(&ts->kobj, &siw_touch_attribute_group);
 
 	kobject_del(&ts->kobj);
 }
-
-int __weak siw_touch_misc_init(struct device *dev)
-{
-	return 0;
-}
-
-void __weak siw_touch_misc_free(struct device *dev)
-{
-
-}
-
-static int siw_touch_add_sysfs_normal(struct siw_ts *ts)
-{
-	struct device *dev = ts->dev;
-	struct kobject *kobj = &ts->kobj;
-	int ret;
-
-	ret = sysfs_create_group(kobj, &siw_touch_attribute_group_normal);
-	if (ret < 0) {
-		t_dev_err(dev, "failed to add sysfs(normal)\n");
-		goto out;
-	}
-
-	ret = siw_ops_sysfs(ts, DRIVER_INIT);
-	if (ret < 0) {
-		t_dev_err(dev, "failed to add sysfs(ops)\n");
-		goto out_ops_sysfs;
-	}
-
-	return 0;
-
-out_ops_sysfs:
-	sysfs_remove_group(kobj, &siw_touch_attribute_group_normal);
-
-out:
-	return ret;
-}
-
-static void siw_touch_del_sysfs_normal(struct siw_ts *ts)
-{
-//	struct device *dev = ts->dev;
-	struct kobject *kobj = &ts->kobj;
-
-	siw_ops_sysfs(ts, DRIVER_FREE);
-
-	sysfs_remove_group(kobj, &siw_touch_attribute_group_normal);
-}
-
-static int siw_touch_add_sysfs_charger(struct siw_ts *ts)
-{
-	struct device *dev = ts->dev;
-	struct kobject *kobj = &ts->kobj;
-	int ret;
-
-	ret = sysfs_create_group(kobj, &siw_touch_attribute_group_charger);
-	if (ret < 0) {
-		t_dev_err(dev, "failed to add sysfs(charger)\n");
-		goto out;
-	}
-
-out:
-	return ret;
-}
-
-static void siw_touch_del_sysfs_charger(struct siw_ts *ts)
-{
-//	struct device *dev = ts->dev;
-	struct kobject *kobj = &ts->kobj;
-
-	sysfs_remove_group(kobj, &siw_touch_attribute_group_charger);
-}
-
-static int siw_touch_do_add_sysfs(struct siw_ts *ts)
-{
-	if (ts->is_charger) {
-		return siw_touch_add_sysfs_charger(ts);
-	}
-
-	return siw_touch_add_sysfs_normal(ts);
-}
-
-static void siw_touch_do_del_sysfs(struct siw_ts *ts)
-{
-	if (ts->is_charger) {
-		siw_touch_del_sysfs_charger(ts);
-		return;
-	}
-
-	siw_touch_del_sysfs_normal(ts);
-}
-
-int siw_touch_add_sysfs(struct siw_ts *ts)
-{
-	struct device *dev = ts->dev;
-	struct device *idev = &ts->input->dev;
-	struct kobject *kobj = &ts->kobj;
-	int ret = 0;
-
-	if (kobj->parent != idev->kobj.parent) {
-		t_dev_err(dev, "Invalid kobject\n");
-		return -EINVAL;
-	}
-
-	ret = siw_touch_do_add_sysfs(ts);
-	if (ret < 0) {
-		return ret;
-	}
-
-	siw_touch_misc_init(dev);
-
-	return 0;
-}
-
-void siw_touch_del_sysfs(struct siw_ts *ts)
-{
-	struct device *dev = ts->dev;
-	struct device *idev = &ts->input->dev;
-	struct kobject *kobj = &ts->kobj;
-
-	if (kobj->parent != idev->kobj.parent) {
-		t_dev_warn(dev, "Invalid kobject\n");
-		return;
-	}
-
-	siw_touch_misc_free(dev);
-
-	siw_touch_do_del_sysfs(ts);
-}
-
 

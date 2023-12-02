@@ -2,7 +2,6 @@
  * SiW touch bus core driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -48,33 +47,6 @@ enum {
 enum {
 	SPI_BUS_RX_DUMMY_FLAG_128BIT = 0x10,
 };
-
-#define __CLOCK_1KHZ		1000
-#define __CLOCK_100KHZ		(100 * __CLOCK_1KHZ)
-#define __CLOCK_1MHZ		(__CLOCK_1KHZ * __CLOCK_1KHZ)
-
-#define SPI_MAX_FREQ		(20 * __CLOCK_1MHZ)
-#define SPI_MIN_FREQ		(1 * __CLOCK_1MHZ)
-
-static inline int spi_freq_out_of_range(u32 freq)
-{
-	return ((freq > SPI_MAX_FREQ) || (freq < SPI_MIN_FREQ));
-}
-
-static inline u32 freq_to_mhz_unit(u32 freq)
-{
-	return (freq / __CLOCK_1MHZ);
-}
-
-static inline u32 freq_to_khz_unit(u32 freq)
-{
-	return (freq / __CLOCK_1KHZ);
-}
-
-static inline u32 freq_to_khz_top(u32 freq)
-{
-	return ((freq % __CLOCK_1MHZ) / __CLOCK_100KHZ);
-}
 
 /* __SIW_SPI_TYPE_1 */
 
@@ -152,8 +124,8 @@ extern void siw_touch_bus_err_dump_data(struct device *dev,
 extern int siw_touch_bus_add_driver(struct siw_touch_chip_data *chip_data);
 extern int siw_touch_bus_del_driver(struct siw_touch_chip_data *chip_data);
 
-extern int siw_touch_bus_pm_suspend(struct device *dev, int freeze);
-extern int siw_touch_bus_pm_resume(struct device *dev, int thaw);
+extern int siw_touch_bus_pm_suspend(struct device *dev);
+extern int siw_touch_bus_pm_resume(struct device *dev);
 
 
 #endif	/* __SIW_TOUCH_BUS_H */

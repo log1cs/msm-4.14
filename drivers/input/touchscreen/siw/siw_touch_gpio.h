@@ -2,7 +2,6 @@
  * siw_touch_gpio.c - SiW touch gpio driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -142,7 +141,6 @@ extern void siw_touch_gpio_direction_output(struct device *dev, int pin, int val
 extern void siw_touch_gpio_set_pull(struct device *dev, int pin, int value);
 
 extern int siw_touch_power_init(struct device *dev);
-extern int siw_touch_power_free(struct device *dev);
 extern void siw_touch_power_vdd(struct device *dev, int value);
 extern void siw_touch_power_vio(struct device *dev, int value);
 

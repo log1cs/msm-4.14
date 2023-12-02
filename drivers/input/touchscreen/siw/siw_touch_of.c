@@ -2,7 +2,6 @@
  * siw_touch_of.c - SiW touch device tree driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -142,7 +141,6 @@ static int siw_touch_of_string(struct device *dev, void *np,
 	return ret;
 }
 
-#if defined(__SIW_SUPPORT_WATCH)
 static int siw_touch_parse_dts_watch(struct siw_ts *ts)
 {
 	struct device *dev = ts->dev;
@@ -158,11 +156,7 @@ static int siw_touch_parse_dts_watch(struct siw_ts *ts)
 out:
 	return 0;
 }
-#else	/* __SIW_SUPPORT_WATCH */
-#define siw_touch_parse_dts_watch(_ts)	({	int _r = 0;	_r; })
-#endif	/* __SIW_SUPPORT_WATCH */
 
-#if defined(__SIW_SUPPORT_PRD)
 /*
  * weak(dummy) function for PRD control
  * These are deactivated by enabling __SIW_SUPPORT_PRD
@@ -211,9 +205,6 @@ static int siw_touch_parse_dts_prd(struct siw_ts *ts)
 
 	return 0;
 }
-#else	/* __SIW_SUPPORT_PRD */
-#define siw_touch_parse_dts_prd(_ts)	({	int _r = 0;	_r; })
-#endif	/* __SIW_SUPPORT_PRD */
 
 static int siw_touch_do_parse_dts(struct siw_ts *ts)
 {
@@ -226,8 +217,8 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 	u32 p_flags = 0;
 	int chip_flags = 0;
 	int irq_flags = 0;
-	enum of_gpio_flags pin_flags = 0;
-	int pin_val = -1;
+	enum of_gpio_flags pin_flags;
+	int pin_val;
 
 	if (!ts->dev->of_node) {
 		t_dev_err(dev, "No dts data\n");
@@ -236,38 +227,15 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 
 	t_dev_dbg_of(dev, "start dts parsing\n");
 
-	chip_flags = siw_touch_of_int(dev, np, "chip_flags");
-	p_flags = pdata_flags(ts->pdata);
-	if ((p_flags & TOUCH_IGNORE_DT_FLAGS) || (chip_flags < 0)) {
-		ts->flags = p_flags;
-	} else {
-		ts->flags = chip_flags & 0xFFFF;
-		ts->flags |= p_flags & (0xFFFFUL<<16);
+	pin_val = siw_touch_of_gpio(dev, np, "reset-gpio", &pin_flags);
+	if (!gpio_is_valid(pin_val)) {
+		return -EINVAL;
 	}
-	if (chip_flags >= 0) {
-		t_dev_info(dev, "flags(of) = 0x%08X (0x%08X, 0x%08X)\n",
-			ts->flags, p_flags, chip_flags);
-	} else {
-		t_dev_info(dev, "flags(of) = 0x%08X (0x%08X, %d)\n",
-			ts->flags, p_flags, chip_flags);
-	}
-
-	if (ts->flags & TOUCH_SKIP_RESET_PIN) {
-		pins->reset_pin = -1;
-		pins->reset_pin_pol = 0;
-	} else {
-		pin_val = siw_touch_of_gpio(dev, np, "reset-gpio", &pin_flags);
-		if (!gpio_is_valid(pin_val)) {
-			t_dev_err(dev, "of gpio  : reset-gpio invalid, %d\n", pin_val);
-			return -EINVAL;
-		}
-		pins->reset_pin = pin_val;
-		pins->reset_pin_pol = !!(pin_flags & OF_GPIO_ACTIVE_LOW);
-	}
+	pins->reset_pin = pin_val;
+	pins->reset_pin_pol = !!(pin_flags & OF_GPIO_ACTIVE_LOW);
 
 	pin_val = siw_touch_of_gpio(dev, np, "irq-gpio", NULL);
 	if (!gpio_is_valid(pin_val)) {
-		t_dev_err(dev, "of gpio  : irq-gpio invalid, %d\n", pin_val);
 		return -EINVAL;
 	}
 	pins->irq_pin= pin_val;
@@ -280,10 +248,12 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 
 	irq_flags = siw_touch_of_u32(dev, np, "irqflags");
 	p_flags = pdata_irqflags(ts->pdata);
+	t_dev_info(dev, "[FIH] %s, %d, irq_flags = %x, p_flags = %x\n", __func__, __LINE__, irq_flags, p_flags);
 	if ((p_flags & TOUCH_IGNORE_DT_FLAGS) || (irq_flags < 0)) {
-		ts->irqflags = p_flags & ~TOUCH_IGNORE_DT_FLAGS;
+		ts->irqflags = p_flags;
 	} else {
-		ts->irqflags = irq_flags;
+		ts->irqflags = irq_flags & 0xFFFF;
+		ts->irqflags |= p_flags & (0xFFFFUL<<16);
 	}
 	if (irq_flags >= 0) {
 		t_dev_info(dev, "irqflags(of) = 0x%08X (0x%08X, 0x%08X)\n",
@@ -291,6 +261,23 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 	} else {
 		t_dev_info(dev, "irqflags(of) = 0x%08X (0x%08X, %d)\n",
 			(u32)ts->irqflags, p_flags, irq_flags);
+	}
+
+	chip_flags = siw_touch_of_int(dev, np, "chip_flags");
+	p_flags = pdata_flags(ts->pdata);
+	t_dev_info(dev, "[FIH] %s, %d, chip_flags = %x, p_flags = %x\n", __func__, __LINE__, chip_flags, p_flags);
+	if ((p_flags & TOUCH_IGNORE_DT_FLAGS) || (chip_flags < 0)) {
+		ts->flags = p_flags;
+	} else {
+		ts->flags = chip_flags & 0xFFFF;
+		ts->flags |= p_flags & (0xFFFFUL<<16);
+	}
+	if (chip_flags >= 0) {
+		t_dev_info(dev, "flags(of) = 0x%08X (0x%08X, 0x%08X)\n",
+			ts->flags, p_flags, chip_flags);
+	} else {
+		t_dev_info(dev, "flags(of) = 0x%08X (0x%08X, %d)\n",
+			ts->flags, p_flags, chip_flags);
 	}
 
 	/* Caps */
@@ -315,7 +302,6 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 		ts->i_id.version = tmp;
 
 	/* Role */
-#if defined(__SIW_CONFIG_KNOCK)
 	if (touch_test_quirks(ts, CHIP_QUIRK_NOT_SUPPORT_LPWG)) {
 		role->use_lpwg = 0;
 		role->use_lpwg_test = 0;
@@ -323,10 +309,6 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 		role->use_lpwg = siw_touch_of_bool(dev, np, "use_lpwg");
 		role->use_lpwg_test = siw_touch_of_u32(dev, np, "use_lpwg_test");
 	}
-#else	/* __SIW_CONFIG_KNOCK */
-	role->use_lpwg = 0;
-	role->use_lpwg_test = 0;
-#endif	/* __SIW_CONFIG_KNOCK */
 
 	/* Firmware */
 	role->use_firmware = siw_touch_of_bool(dev, np, "use_firmware");
@@ -345,6 +327,9 @@ static int siw_touch_do_parse_dts(struct siw_ts *ts)
 		ts->panel_spec_mfts = NULL;
 	}
 
+	//SW8-DH-AllPowerOff-00+[
+	ts->RTC_CLK_gpio= siw_touch_of_gpio(dev, np, "qcom,RTC_CLK-gpios", NULL);
+	//SW8-DH-AllPowerOff-00+[
 	siw_touch_parse_dts_watch(ts);
 
 	siw_touch_parse_dts_prd(ts);
@@ -391,9 +376,6 @@ out:
 static int siw_touch_parse_dts(struct siw_ts *ts)
 {
 	struct device *dev = ts->dev;
-	struct touch_pins *pins = &ts->pins;
-
-	t_dev_info(dev, "__SIW_CONFIG_OF disabled\n");
 
 	ts->irqflags = pdata_irqflags(ts->pdata);
 
@@ -401,32 +383,12 @@ static int siw_touch_parse_dts(struct siw_ts *ts)
 	t_dev_info(dev, "flags = 0x%08X", ts->flags);
 
 	touch_set_pins(ts, &ts->pdata->pins);
-	if (ts->flags & TOUCH_SKIP_RESET_PIN) {
-		pins->reset_pin = -1;
-		pins->reset_pin_pol = 0;
-	} else {
-		if (!gpio_is_valid(pins->reset_pin)) {
-			t_dev_err(dev, "reset_pin invalid, %d\n", pins->reset_pin);
-			return -EINVAL;
-		}
-		t_dev_info(dev, "reset_pin = %d\n", pins->reset_pin);
-	}
-	if (!gpio_is_valid(pins->irq_pin)) {
-		t_dev_err(dev, "irq_pin invalid, %d\n", pins->irq_pin);
-		return -EINVAL;
-	}
-	t_dev_info(dev, "irq_pin = %d\n", pins->irq_pin);
-
 	touch_set_caps(ts, &ts->pdata->caps);
 
 	memcpy((void *)&ts->i_id, (void *)&ts->pdata->i_id, sizeof(ts->i_id));
 
 	/* Role */
-#if defined(__SIW_CONFIG_KNOCK)
 	ts->role.use_lpwg = !touch_test_quirks(ts, CHIP_QUIRK_NOT_SUPPORT_LPWG);
-#else	/* __SIW_CONFIG_KNOCK */
-	ts->role.use_lpwg = 0;
-#endif	/* __SIW_CONFIG_KNOCK */
 
 	ts->role.use_firmware = 0;
 	ts->role.use_fw_upgrade = 0;

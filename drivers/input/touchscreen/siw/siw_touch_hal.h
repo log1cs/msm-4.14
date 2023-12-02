@@ -2,7 +2,6 @@
  * SiW touch hal driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -25,23 +24,15 @@ enum {
 	NON_FAULT_INT 	= -1,
 	NON_FAULT_U32	= ~0,
 };
-
-/* report packet - type 1 */
-struct siw_hal_touch_data_type_1 {
-	u32 track_id:5;
-	u32 tool_type:3;
-	u32 angle:8;
-	u32 event:2;
-	u32 x:14;
-
-	u32 y:14;
-	u32 pressure:8;
-	u32 reserve1:10;
-
-	u32 reserve2:4;
-	u32 width_major:14;
-	u32 width_minor:14;
-} __packed;
+//SW8-DH-TP_Selftest-00+[
+enum test_results
+{
+	TEST_PASS = 0,
+	TEST_FAIL,
+	U3_TEST_FAIL,
+	U0_TEST_FAIL,
+};
+//SW8-DH-TP_Selftest-00+]
 
 /* report packet */
 struct siw_hal_touch_data {
@@ -264,10 +255,6 @@ struct siw_hal_fw_info {
 	u32 date;
 	u32 time;
 	u32 conf_index;
-	/* __SIW_FW_TYPE_1 */
-	u32 conf_idx_addr;
-	u32 conf_dn_addr;
-	u32 boot_code_addr;
 };
 
 static inline void siw_hal_fw_set_chip_id(struct siw_hal_fw_info *fw, u32 chip_id)
@@ -360,16 +347,9 @@ struct siw_hal_swipe_ctrl {
 };
 
 enum {
-	CHIP_REPORT_NONE = 0,
-	CHIP_REPORT_TYPE_0,
-	CHIP_REPORT_TYPE_1,
-};
-
-enum {
 	CHIP_STATUS_NONE = 0,
 	CHIP_STATUS_TYPE_0,
 	CHIP_STATUS_TYPE_1,
-	CHIP_STATUS_TYPE_2,
 };
 
 enum {
@@ -383,9 +363,7 @@ enum {
 	STS_ID_ERROR_MISMTACH,
 	STS_ID_VALID_IRQ_PIN,
 	STS_ID_VALID_IRQ_EN,
-	STS_ID_ERROR_MEM,
 	STS_ID_VALID_TC_DRV,
-	STS_ID_ERROR_DISP,
 };
 
 enum {
@@ -398,9 +376,7 @@ enum {
 	STS_POS_ERROR_MISMTACH			= 13,
 	STS_POS_VALID_IRQ_PIN			= 15,
 	STS_POS_VALID_IRQ_EN			= 20,
-	STS_POS_ERROR_MEM				= 21,
 	STS_POS_VALID_TC_DRV			= 22,
-	STS_POS_ERROR_DISP				= 31,
 	/* */
 	STS_POS_VALID_CODE_CRC_TYPE_0	= 22,
 };
@@ -414,9 +390,7 @@ struct siw_hal_status_mask_bit {
 	u32 error_mismtach;
 	u32 valid_irq_pin;
 	u32 valid_irq_en;
-	u32 error_mem;
 	u32 valid_tv_drv;
-	u32 error_disp;
 };
 
 struct siw_hal_status_filter {
@@ -452,68 +426,8 @@ struct siw_hal_reg_log {
 	u32 data;
 };
 
-struct siw_touch_chip_opt {
-	u32 f_info_more:1;
-	u32 f_ver_ext:1;
-	u32 f_attn_opt:1;
-	u32 f_glove_en:1;
-	u32 f_grab_en:1;
-	u32 f_dbg_report:1;
-	u32 f_u2_blank_chg:1;
-	u32 f_rsvd00:1;
-	u32 f_rsvd01:8;
-	u32 f_rsvd02:8;
-	u32 f_rsvd03:8;
-	/* */
-	u32 t_boot_mode:4;
-	u32 t_sts_mask:4;
-	u32 t_chk_mode:4;
-	u32 t_sw_rst:4;
-	u32 t_clock:4;
-	u32 t_chk_mipi:4;
-	u32 t_chk_frame:4;
-	u32 t_chk_tci_debug:4;
-	/* */
-	u32 t_chk_sys_error:4;
-	u32 t_chk_sys_fault:4;
-	u32 t_chk_fault:4;
-	u32 rsvd21:4;
-	u32 rsvd22:8;
-	u32 rsvd23:8;
-};
-
-enum {
-	HAL_DBG_GRP_0 = 0,
-	HAL_DBG_GRP_MAX,
-};
-
-enum {
-	HAL_DBG_DLY_TC_DRIVING_0 = 0,
-	HAL_DBG_DLY_TC_DRIVING_1,
-	HAL_DBG_DLY_FW_0,
-	HAL_DBG_DLY_FW_1,
-	HAL_DBG_DLY_FW_2,
-	HAL_DBG_DLY_HW_RST_0,
-	HAL_DBG_DLY_HW_RST_1,
-	HAL_DBG_DLY_HW_RST_2,
-	HAL_DBG_DLY_SW_RST_0,
-	HAL_DBG_DLY_SW_RST_1,
-	HAL_DBG_DLY_NOTIFY,
-	HAL_DBG_DLY_LPWG,
-	HAL_DBG_DLY_MAX,
-};
-
-struct siw_hal_debug {
-	/* group 0 : delay */
-	u32 delay[HAL_DBG_DLY_MAX];
-	/* group 1 : rsvd */
-	/* group 2 : rsvd */
-	/* group 3 : rsvd */
-};
-
 struct siw_touch_chip {
 	void *ts;			//struct siw_ts
-	struct siw_touch_chip_opt opt;
 	struct siw_hal_reg *reg;
 	struct device *dev;
 	struct kobject kobj;
@@ -522,22 +436,16 @@ struct siw_touch_chip {
 	struct siw_hal_asc_info asc;
 	struct siw_hal_swipe_ctrl swipe;
 	/* */
-	int report_type;
 	int status_type;
 	u32 status_mask;
 	u32 status_mask_normal;
 	u32 status_mask_logging;
 	u32 status_mask_reset;
 	u32 status_mask_ic_abnormal;
-	u32 status_mask_ic_error;
 	u32 status_mask_ic_valid;
-	u32 status_mask_ic_disp_err;
 	struct siw_hal_status_mask_bit status_mask_bit;
 	struct siw_hal_status_filter *status_filter;
 	/* */
-	int drv_reset_low;
-	int drv_delay;
-	int drv_opt_delay;
 	u8 prev_lcd_mode;
 	u8 lcd_mode;
 	u8 driving_mode;
@@ -559,14 +467,7 @@ struct siw_touch_chip {
 	struct pm_qos_request pm_qos_req;
 #endif
 	struct siw_hal_reg_log reg_log[REG_LOG_MAX];
-	struct siw_hal_debug dbg;
-	int fw_abs_path;
 };
-
-static inline int hal_dbg_delay(struct siw_touch_chip *chip, int index)
-{
-	return (index < HAL_DBG_DLY_MAX) ? chip->dbg.delay[index] : 0;
-}
 
 enum {
 	BOOT_FAIL_RECOVERY_MAX = 3,	/* to avoid infinite repetition */

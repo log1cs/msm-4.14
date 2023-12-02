@@ -1,7 +1,3 @@
-/*
- * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
- */
 
 #include <linux/kernel.h>
 #include <linux/types.h>

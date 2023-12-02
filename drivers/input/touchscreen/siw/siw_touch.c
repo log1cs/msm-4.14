@@ -2,7 +2,6 @@
  * siw_touch.c - SiW touch core driver
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -46,23 +45,29 @@
 #include "siw_touch_gpio.h"
 #include "siw_touch_irq.h"
 #include "siw_touch_sys.h"
+#include "../../../fih/fih_touch.h"//SW8-DH-Touchpanel-Bringup-00
 
 
 #if !defined(__SIW_CONFIG_OF)
-//#pragma message("[SiW - Warning] No COFIG_OF")
+#pragma message("[SiW - Warning] No COFIG_OF")
 #endif
 
 extern int siw_touch_init_sysfs(struct siw_ts *ts);
 extern void siw_touch_free_sysfs(struct siw_ts *ts);
 
-extern int siw_touch_add_sysfs(struct siw_ts *ts);
-extern void siw_touch_del_sysfs(struct siw_ts *ts);
-
 extern int siw_touch_parse_data(struct siw_ts *ts);
 
+extern int tp_probe_success;
+
+
+/* Original
 #if 0
 u32 t_pr_dbg_mask = DBG_NONE | DBG_INFO;
 u32 t_dev_dbg_mask = DBG_NONE | DBG_BASE | DBG_INFO | DBG_GPIO | DBG_OF;
+*/
+#if 0 //SW8-DH-Touchpanel-Bringup-00
+u32 t_pr_dbg_mask = DBG_NONE  | DBG_BASE;
+u32 t_dev_dbg_mask = DBG_NONE | DBG_BASE | DBG_GPIO | DBG_OF | DBG_NOTI ;
 #else
 u32 t_pr_dbg_mask = DBG_NONE;
 u32 t_dev_dbg_mask = DBG_NONE;
@@ -185,7 +190,6 @@ int siw_setup_params(struct siw_ts *ts, struct siw_touch_pdata *pdata)
 	struct device *dev = ts->dev;
 	int max_finger = 0;
 	int type = 0;
-	u32 mode_allowed = 0;
 	int ret = 0;
 
 	max_finger = pdata_max_finger(pdata);
@@ -202,17 +206,6 @@ int siw_setup_params(struct siw_ts *ts, struct siw_touch_pdata *pdata)
 	}
 	ts->chip_type = type;
 	t_dev_info(dev, "chip type  : 0x%04X\n", type);
-
-	mode_allowed = pdata->mode_allowed;
-	if (!mode_allowed) {
-		return -EFAULT;
-	}
-#if defined(__SIW_CONFIG_SYSTEM_PM)
-	mode_allowed &= ~(LCD_MODE_BIT_U0|LCD_MODE_BIT_U3_PARTIAL);
-	mode_allowed &= ~(LCD_MODE_BIT_U2|LCD_MODE_BIT_U2_UNBLANK);
-#endif	/* __SIW_CONFIG_SYSTEM_PM */
-	ts->mode_allowed = mode_allowed;
-	t_dev_info(dev, "mode bit   : 0x%08X\n", mode_allowed);
 
 	ret = siw_setup_names(ts, pdata);
 	if (ret < 0) {
@@ -257,7 +250,8 @@ static void siw_setup_reg_quirks(struct siw_ts *ts)
 				continue;
 			}
 
-			if ((old_addr == ~0) || (new_addr == ~0)) {
+			if (!old_addr || !new_addr ||
+				(old_addr == ~0) || (new_addr == ~0)) {
 				break;
 			}
 
@@ -407,6 +401,7 @@ static void siw_touch_resume(struct device *dev)
 
 	mutex_lock(&ts->lock);
 	atomic_set(&ts->state.fb, FB_RESUME);
+	atomic_set(&ts->state.pm, DEV_PM_AWAKE);
 	/* if need skip, return value is not 0 in pre_resume */
 	ret = siw_ops_resume(ts);
 	mutex_unlock(&ts->lock);
@@ -429,6 +424,7 @@ void siw_touch_suspend_call(struct device *dev)
 	siw_touch_suspend(dev);
 #endif
 }
+
 
 /**
  * siw_touch_resume_call() - Helper function for touch resume
@@ -504,43 +500,15 @@ static int siw_touch_fb_notifier_callback(
 	struct siw_ts *ts =
 		container_of(self, struct siw_ts, fb_notif);
 	struct fb_event *ev = (struct fb_event *)data;
-	int *blank;
 
-	if (!ev || !ev->data) {
-		return 0;
-	}
+	if (ev && ev->data && event == FB_EVENT_BLANK) {
+		int *blank = (int *)ev->data;
 
-	blank = (int *)ev->data;
-
-#if defined(__SIW_CONFIG_SYSTEM_PM)
-	if (event == FB_EARLY_EVENT_BLANK) {
-		if (*blank == FB_BLANK_UNBLANK) {
-			t_dev_info(ts->dev, "fb_unblank(early)\n");
-		} else if (*blank == FB_BLANK_POWERDOWN) {
-			t_dev_info(ts->dev, "fb_blank(early)\n");
-			siw_touch_suspend(ts->dev);
-		}
-	}
-
-	if (event == FB_EVENT_BLANK) {
-		if (*blank == FB_BLANK_UNBLANK) {
-			t_dev_info(ts->dev, "fb_unblank\n");
+		if (*blank == FB_BLANK_UNBLANK)
 			siw_touch_resume(ts->dev);
-		} else if (*blank == FB_BLANK_POWERDOWN) {
-			t_dev_info(ts->dev, "fb_blank\n");
-		}
-	}
-#else	/* __SIW_CONFIG_SYSTEM_PM */
-	if (event == FB_EVENT_BLANK) {
-		if (*blank == FB_BLANK_UNBLANK) {
-			t_dev_info(ts->dev, "fb_unblank\n");
-			siw_touch_resume(ts->dev);
-		} else if (*blank == FB_BLANK_POWERDOWN) {
-			t_dev_info(ts->dev, "fb_blank\n");
+		else if (*blank == FB_BLANK_POWERDOWN)
 			siw_touch_suspend(ts->dev);
-		}
 	}
-#endif	/* __SIW_CONFIG_SYSTEM_PM */
 
 	return 0;
 }
@@ -561,24 +529,8 @@ static int __used siw_touch_free_pm(struct siw_ts *ts)
 
 	return 0;
 }
-#elif defined(__SIW_CONFIG_USER_FB)
-static int __used siw_touch_init_pm(struct siw_ts *ts)
-{
-	t_dev_dbg_pm(ts->dev, "sys_fb_register_client\n");
-
-	return siw_touch_sys_fb_register_client(ts->dev);
-}
-
-static int __used siw_touch_free_pm(struct siw_ts *ts)
-{
-	t_dev_dbg_pm(ts->dev, "sys_fb_unregister_client\n");
-
-	siw_touch_sys_fb_unregister_client(ts->dev);
-
-	return 0;
-}
 #else
-//#pragma message("[SiW - Warning] No core pm operation")
+#pragma message("[SiW - Warning] No core pm operation")
 static int __used __siw_touch_init_pm_none(struct siw_ts *ts, int init)
 {
 	t_dev_dbg_pm(ts->dev, "pm %s none\n", (init) ? "free" : "init");
@@ -714,7 +666,6 @@ static void __used siw_touch_init_locks(struct siw_ts *ts)
 
 	mutex_init(&ts->lock);
 	mutex_init(&ts->reset_lock);
-	mutex_init(&ts->probe_lock);
 #if defined(__SIW_SUPPORT_WAKE_LOCK)
 	wake_lock_init(&ts->lpwg_wake_lock,
 		WAKE_LOCK_SUSPEND, SIW_TOUCH_LPWG_LOCK_NAME);
@@ -727,7 +678,6 @@ static void __used siw_touch_free_locks(struct siw_ts *ts)
 
 	mutex_destroy(&ts->lock);
 	mutex_destroy(&ts->reset_lock);
-	mutex_destroy(&ts->probe_lock);
 #if defined(__SIW_SUPPORT_WAKE_LOCK)
 	wake_lock_destroy(&ts->lpwg_wake_lock);
 #endif
@@ -835,6 +785,7 @@ static void siw_touch_upgrade_work_func(struct work_struct *work)
 			t_dev_err(dev, "FW upgrade skipped\n");
 		} else {
 			t_dev_err(dev, "FW upgrade halted, %d\n", ret);
+			printk("BBox::UEC;7::6\n");//SW8-DH-fw_upgrade-fail
 		}
 	//	siw_touch_qd_init_work_now(ts);
 	//	atomic_set(&ts->state.core, CORE_NORMAL);
@@ -868,6 +819,8 @@ static void siw_touch_fb_work_func(struct work_struct *work)
 }
 
 #if defined(__SIW_CONFIG_USE_SYS_PANEL_RESET)
+extern int siw_touch_notify(struct siw_ts *ts, unsigned long event, void *data);
+
 static void siw_touch_sys_reset_work_func(struct work_struct *work)
 {
 	struct siw_ts *ts =
@@ -992,33 +945,6 @@ static void siw_touch_finger_input_check_work_func(
 }
 #endif	/* __SIW_SUPPORT_ASC */
 
-static int siw_touch_mon_chk_pause(struct siw_ts *ts)
-{
-	struct siw_ts_thread *ts_thread = &ts->mon_thread;
-	int curr_state;
-
-	mutex_lock(&ts_thread->lock);
-	curr_state = (atomic_read(&ts->state.mon_ignore)) ?	\
-				TS_THREAD_PAUSE : TS_THREAD_ON;
-	atomic_set(&ts_thread->state, curr_state);
-	mutex_unlock(&ts_thread->lock);
-
-	return (curr_state == TS_THREAD_PAUSE);
-}
-
-static int siw_touch_mon_can_handler(struct siw_ts *ts)
-{
-	if (touch_get_dev_data(ts) == NULL) {
-		return 0;
-	}
-
-	if (atomic_read(&ts->state.core) != CORE_NORMAL) {
-		return 0;
-	}
-
-	return 1;
-}
-
 static int siw_touch_mon_thread(void *d)
 {
 	struct siw_ts *ts = d;
@@ -1046,40 +972,25 @@ static int siw_touch_mon_thread(void *d)
 
 		set_current_state(TASK_RUNNING);
 
-		if (siw_touch_mon_chk_pause(ts)) {
+		if (atomic_read(&ts->state.core) != CORE_NORMAL) {
 			continue;
 		}
 
-		if (siw_touch_mon_can_handler(ts)) {
-			ret = handler(dev, 0);
+		if (atomic_read(&ts->state.mon_ignore)) {
+			atomic_set(&ts_thread->state, TS_THREAD_PAUSE);
+			continue;
 		}
 
-		siw_touch_mon_chk_pause(ts);
+		atomic_set(&ts_thread->state, TS_THREAD_ON);
+
+		ret = handler(dev, 0);
+
+		if (atomic_read(&ts->state.mon_ignore)) {
+			atomic_set(&ts_thread->state, TS_THREAD_PAUSE);
+		}
 	}
 
 	atomic_set(&ts_thread->state, TS_THREAD_OFF);
-
-	return 0;
-}
-
-static int siw_touch_mon_hold_set(struct device *dev, int pause)
-{
-	struct siw_ts *ts = to_touch_core(dev);
-	struct siw_ts_thread *ts_thread = &ts->mon_thread;
-	char *name = (pause) ? "pause" : "resume";
-	int prev_state = (pause) ? TS_THREAD_ON : TS_THREAD_PAUSE;
-
-	if (ts_thread->thread == NULL) {
-		return -EINVAL;
-	}
-
-	if (atomic_read(&ts_thread->state) != prev_state) {
-		return -EINVAL;
-	}
-
-	t_dev_info(dev, "mon thread %s\n", name);
-
-	atomic_set(&ts->state.mon_ignore, !!pause);
 
 	return 0;
 }
@@ -1089,31 +1000,41 @@ static void siw_touch_mon_hold(struct device *dev, int pause)
 	struct siw_ts *ts = to_touch_core(dev);
 	struct siw_ts_thread *ts_thread = &ts->mon_thread;
 	char *name = (pause) ? "pause" : "resume";
+	int prev_state = (pause) ? TS_THREAD_ON : TS_THREAD_PAUSE;
 	int new_state = (pause) ? TS_THREAD_PAUSE : TS_THREAD_ON;
-	int ret = 0;
 
 	if (!(touch_flags(ts) & TOUCH_USE_MON_THREAD)) {
 		return;
 	}
 
 	mutex_lock(&ts_thread->lock);
-	ret = siw_touch_mon_hold_set(dev, pause);
-	mutex_unlock(&ts_thread->lock);
-	if (ret < 0) {
-		return;
+
+	if (ts_thread->thread == NULL) {
+		goto out;
 	}
 
+	if (atomic_read(&ts_thread->state) != prev_state) {
+		goto out;
+	}
+
+	t_dev_info(dev,
+			"mon thread %s\n", name);
+
+	atomic_set(&ts->state.mon_ignore, !!pause);
+
+	wake_up_process(ts_thread->thread);
+
 	while (1) {
-		wake_up_process(ts_thread->thread);
-
 		touch_msleep(1);
-
 		if (atomic_read(&ts_thread->state) == new_state)
 			break;
 
 		t_dev_info(dev,
 			"waiting for mon thread %s\n", name);
 	}
+
+out:
+	mutex_unlock(&ts_thread->lock);
 }
 
 void siw_touch_mon_pause(struct device *dev)
@@ -1126,9 +1047,11 @@ void siw_touch_mon_resume(struct device *dev)
 	siw_touch_mon_hold(dev, 0);
 }
 
-#define siw_touch_kthread_run(__dev, __threadfn, __data, __name) \
+#define siw_touch_kthread_run(__dev, __threadfn, __data, __namefmt, args...) \
 ({	\
 	struct task_struct *__k;	\
+	char __name[64];	\
+	snprintf(__name, sizeof(__name), __namefmt, ##args);	\
 	__k = kthread_run(__threadfn, __data, "%s", __name);	\
 	if (IS_ERR(__k))	\
 		t_dev_err(__dev, "kthread_run failed : %s\n", __name);	\
@@ -1144,26 +1067,14 @@ static int __used siw_touch_init_thread(struct siw_ts *ts)
 	struct siw_ts_thread *ts_thread = NULL;
 	struct task_struct *thread;
 	siw_mon_handler_t handler;
-	char *thread_name;
 	int interval;
 	int ret = 0;
-
-	if (t_dbg_flag & DBG_FLAG_SKIP_MON_THREAD) {
-		ts->flags &= ~TOUCH_USE_MON_THREAD;
-	}
-	if (t_dbg_flag & DBG_FLAG_TEST_MON_THREAD) {
-		ts->flags |= TOUCH_USE_MON_THREAD;
-	}
 
 	if (!(touch_flags(ts) & TOUCH_USE_MON_THREAD)) {
 		goto out;
 	}
 
 	ts_thread = &ts->mon_thread;
-
-	if (ts_thread->thread != NULL) {
-		goto out;
-	}
 
 	mutex_init(&ts_thread->lock);
 
@@ -1185,21 +1096,17 @@ static int __used siw_touch_init_thread(struct siw_ts *ts)
 		goto out;
 	}
 
-/*
 	do {
 		touch_msleep(10);
 	} while (atomic_read(&ts->state.core) != CORE_NORMAL);
-*/
 
 	atomic_set(&ts_thread->state, TS_THREAD_OFF);
 	ts_thread->interval = interval;
 	ts_thread->handler = handler;
 
-	thread_name = touch_drv_name(ts);
-	thread_name = (thread_name) ? thread_name : SIW_TOUCH_NAME;
 	thread = siw_touch_kthread_run(dev,
 					siw_touch_mon_thread, ts,
-					thread_name);
+					"siw_touch-%d", MINOR(dev->devt));
 	if (IS_ERR(thread)) {
 		ret = PTR_ERR(thread);
 		goto out;
@@ -1216,7 +1123,7 @@ static void __used siw_touch_free_thread(struct siw_ts *ts)
 {
 //	struct device *dev = ts->dev;
 	struct siw_ts_thread *ts_thread = NULL;
-//	char comm[TASK_COMM_LEN] = { 0, };
+	char comm[TASK_COMM_LEN] = { 0, };
 
 	if (!(touch_flags(ts) & TOUCH_USE_MON_THREAD)) {
 		return;
@@ -1228,7 +1135,7 @@ static void __used siw_touch_free_thread(struct siw_ts *ts)
 		return;
 	}
 
-//	memcpy(comm, ts_thread->thread->comm, TASK_COMM_LEN);
+	memcpy(comm, ts_thread->thread->comm, TASK_COMM_LEN);
 	kthread_stop(ts_thread->thread);
 
 	ts_thread->thread = NULL;
@@ -1275,6 +1182,8 @@ static void __used siw_touch_free_works(struct siw_ts *ts)
 		destroy_workqueue(ts->wq);
 		ts->wq = NULL;
 	}
+
+	siw_touch_free_thread(ts);
 }
 
 static irqreturn_t __used siw_touch_irq_handler(int irq, void *dev_id)
@@ -1368,11 +1277,6 @@ static irqreturn_t __used siw_touch_irq_thread(int irq, void *dev_id)
 		goto out;
 	}
 
-	if (ts->ops->irq_dbg_handler) {
-		ret = ts->ops->irq_dbg_handler(dev);
-		goto out;
-	}
-
 	mutex_lock(&ts->lock);
 	ret = _siw_touch_do_irq_thread(ts);
 	mutex_unlock(&ts->lock);
@@ -1407,7 +1311,7 @@ static int __used siw_touch_verify_pdata(struct siw_ts *ts)
 	return 0;
 }
 
-static struct siw_touch_pdata *siw_touch_probe_common(struct siw_ts *ts)
+static struct siw_touch_pdata *_siw_touch_do_probe_common(struct siw_ts *ts)
 {
 	struct siw_touch_pdata *pdata = NULL;
 	struct device *dev = ts->dev;
@@ -1468,54 +1372,16 @@ static struct siw_touch_pdata *siw_touch_probe_common(struct siw_ts *ts)
 		goto out_bus_init;
 	}
 
-	siw_touch_init_locks(ts);
-
-	ret = siw_touch_init_works(ts);
+	ret = siw_ops_probe(ts);
 	if (ret) {
-		t_dev_err(dev, "failed to initialize works, %d\n", ret);
-		goto out_init_works;
-	}
-
-	ret = siw_touch_init_input(ts);
-	if (ret) {
-		t_dev_err(dev, "failed to register input device, %d\n", ret);
-		goto out_init_input;
-	}
-
-	ret = siw_touch_init_uevent(ts);
-	if (ret) {
-		t_dev_err(dev, "failed to initialize uevent, %d\n", ret);
-		goto out_init_uevent;
-	}
-
-	ret = siw_touch_init_sysfs(ts);
-	if (ret) {
-		t_dev_err(dev, "failed to initialize sysfs, %d\n", ret);
-		goto out_init_sysfs;
-	}
-
-	ret = siw_touch_init_notify(ts);
-	if (ret) {
-		t_dev_err(dev, "failed to initialize notifier, %d\n", ret);
-		goto out_init_notify;
+		t_dev_err(dev, "failed to probe, %d\n", ret);
+		printk("BBox::UEC;7::0\n");//SW8-DH-lg4946_probe_fail
+		goto out_ops_probe;
 	}
 
 	return pdata;
 
-out_init_notify:
-	siw_touch_free_sysfs(ts);
-
-out_init_sysfs:
-	siw_touch_free_uevent(ts);
-
-out_init_uevent:
-	siw_touch_free_input(ts);
-
-out_init_input:
-	siw_touch_free_works(ts);
-
-out_init_works:
-	siw_touch_free_locks(ts);
+out_ops_probe:
 
 out_bus_init:
 	siw_touch_bus_pin_put(ts);
@@ -1524,61 +1390,97 @@ out_bus_pin:
 	siw_touch_bus_free_buffer(ts);
 
 out:
+
 	return NULL;
 }
 
-static void siw_touch_remove_common(struct siw_ts *ts)
+static void _siw_touch_do_remove_common(struct siw_ts *ts)
 {
 //	struct siw_touch_pdata *pdata = (struct siw_touch_pdata *)ts->pdata;
 
-	siw_touch_free_notify(ts);
-
-	siw_touch_free_sysfs(ts);
-
-	siw_touch_free_uevent(ts);
-
-	siw_touch_free_input(ts);
-
-	siw_touch_free_works(ts);
-
-	siw_touch_free_locks(ts);
+	siw_ops_remove(ts);
 
 	siw_touch_bus_pin_put(ts);
-
 	siw_touch_bus_free_buffer(ts);
 }
 
-static int __siw_touch_probe_init(void *data)
+static int siw_touch_probe_init(void *data)
 {
 	struct siw_ts *ts = data;
 	struct device *dev = ts->dev;
-	const char *irq_name = NULL;
-	int ret = 0;
+	int ret;
 
-	ret = siw_ops_probe(ts);
+	ts->init_late = NULL;
+
+	t_dev_dbg_base(dev, "hw_reset_delay : %d ms\n", ts->caps.hw_reset_delay);
+	siw_touch_qd_init_work_hw(ts);
+
+	ret = siw_touch_init_thread(ts);
 	if (ret) {
-		t_dev_err(dev, "failed to probe, %d\n", ret);
+		t_dev_err(ts->dev, "failed to create workqueue\n");
 		goto out;
 	}
 
-	ret = siw_touch_add_sysfs(ts);
-	if (ret) {
-		t_dev_err(dev, "failed to add sysfs, %d\n", ret);
-		goto out_add_sysfs;
+out:
+	return ret;
+}
+
+static int siw_touch_do_normal_probe_init(struct siw_ts *ts)
+{
+	if (touch_flags(ts) & TOUCH_USE_PROBE_INIT_LATE) {
+		/*
+		 * Postpone actual init control
+		 * This is related to LCD_EVENT_TOUCH_INIT_LATE and
+		 * shall be controlled by MIPI via notifier
+		 */
+		ts->init_late = siw_touch_probe_init;
+		return 0;
 	}
 
-	ret = siw_touch_init_pm(ts);
-	if (ret) {
-		t_dev_err(dev, "failed to init pm\n");
-		goto out_init_pm;
+	ts->init_late = NULL;
+
+	return siw_touch_probe_init(ts);
+}
+
+static int siw_touch_do_probe_normal(void *data)
+{
+	struct siw_ts *ts = data;
+	struct siw_touch_pdata *pdata = NULL;
+	struct device *dev = NULL;
+	const char *irq_name = NULL;
+	int ret = 0;
+	t_dev_info(dev, "%s, %d\n", __func__, __LINE__);
+
+	pdata = _siw_touch_do_probe_common(ts);
+	if (!pdata) {
+		return -EINVAL;
 	}
 
-	if (ts->is_charger) {
-		goto skip_charger;
-	}
+	dev = ts->dev;
+
+	/* set defalut lpwg value because of AAT */
+	ts->role.mfts_lpwg = t_mfts_lpwg;
+
+	ts->lpwg.mode = t_lpwg_mode;
+	ts->lpwg.screen = t_lpwg_screen;
+	ts->lpwg.sensor = t_lpwg_sensor;
+	ts->lpwg.qcover = t_lpwg_qcover;
 
 	siw_ops_power(ts, POWER_OFF);
 	siw_ops_power(ts, POWER_ON);
+
+	siw_touch_init_locks(ts);
+	ret = siw_touch_init_works(ts);
+	if (ret) {
+		t_dev_err(dev, "failed to initialize works\n");
+		goto out_init_works;
+	}
+
+	ret = siw_touch_init_input(ts);
+	if (ret) {
+		t_dev_err(dev, "failed to register input device, %d\n", ret);
+		goto out_init_input;
+	}
 
 #if defined(__SIW_TEST_IRQ_OFF)
 	ts->irq = 0;
@@ -1601,229 +1503,282 @@ static int __siw_touch_probe_init(void *data)
 	siw_touch_disable_irq(dev, ts->irq);
 //	t_dev_dbg_irq(dev, "disable irq until init completed\n");
 
-	ret = siw_touch_init_thread(ts);
+	siw_touch_init_pm(ts);
+
+	ret = siw_touch_init_notify(ts);
 	if (ret) {
-		t_dev_err(dev, "failed to create thread\n");
-		goto out_init_thread;
+		t_dev_err(dev, "failed to initialize notifier, %d\n", ret);
+		goto out_init_notify;
+	}
+	siw_touch_blocking_notifier_call(
+							LCD_EVENT_TOUCH_DRIVER_REGISTERED,
+							NULL);
+
+	ret = siw_touch_init_uevent(ts);
+	if (ret) {
+		t_dev_err(dev, "failed to initialize uevent, %d\n", ret);
+		goto out_init_uevent;
 	}
 
-	t_dev_dbg_base(dev, "hw_reset_delay : %d ms\n", ts->caps.hw_reset_delay);
-	siw_touch_qd_init_work_hw(ts);
+	ret = siw_touch_init_sysfs(ts);
+	if (ret) {
+		t_dev_err(dev, "failed to initialize sysfs, %d\n", ret);
+		goto out_init_sysfs;
+	}
 
-skip_charger:
-	ts->init_late_done = 1;
+	ret = siw_touch_do_normal_probe_init(ts);
+	if (ret < 0) {
+		goto out_probe_late;
+	}
+
+	t_dev_info(dev, "probe(normal) done\n");
+	tp_probe_success = 1;
 
 	return 0;
 
-out_init_thread:
+out_probe_late:
+
+out_init_sysfs:
+	siw_touch_free_uevent(ts);
+
+out_init_uevent:
+	siw_touch_blocking_notifier_call(
+							LCD_EVENT_TOUCH_DRIVER_UNREGISTERED,
+							NULL);
+	siw_touch_free_notify(ts);
+
+out_init_notify:
+	siw_touch_free_pm(ts);
 	siw_touch_free_irq(ts);
 
 out_request_irq:
+	siw_touch_free_input(ts);
+
+out_init_input:
+	siw_touch_free_works(ts);
+	siw_touch_free_locks(ts);
+
+out_init_works:
 	siw_ops_power(ts, POWER_OFF);
+
+	_siw_touch_do_remove_common(ts);
+
+	return ret;
+}
+
+static int siw_touch_do_remove_normal(void *data)
+{
+	struct siw_ts *ts = data;
+//	struct siw_touch_pdata *pdata = (struct siw_touch_pdata *)ts->pdata;
+//	struct device *dev = ts->dev;
+
+	siw_touch_free_thread(ts);
+
+	siw_touch_free_sysfs(ts);
+
+	siw_touch_free_uevent(ts);
+
+	siw_touch_blocking_notifier_call(
+							LCD_EVENT_TOUCH_DRIVER_UNREGISTERED,
+							NULL);
+	siw_touch_free_notify(ts);
 
 	siw_touch_free_pm(ts);
 
-out_init_pm:
-	siw_touch_del_sysfs(ts);
+	siw_touch_free_irq(ts);
 
-out_add_sysfs:
-	siw_ops_remove(ts);
+	siw_touch_free_input(ts);
+
+	siw_touch_free_works(ts);
+	siw_touch_free_locks(ts);
+
+	siw_ops_power(ts, POWER_OFF);
+
+	_siw_touch_do_remove_common(ts);
+
+	return 0;
+}
+
+static int siw_touch_do_probe_charger(void *data)
+{
+	struct siw_touch_pdata *pdata = NULL;
+	struct siw_ts *ts = data;
+	struct device *dev;
+	int ret = 0;
+
+	pdata = _siw_touch_do_probe_common(ts);
+	if (!pdata) {
+		return -EINVAL;
+	}
+
+	dev = ts->dev;
+
+	siw_touch_init_locks(ts);
+	ret = siw_touch_init_works(ts);
+	if (ret) {
+		t_dev_err(dev, "failed to initialize works, %d\n", ret);
+		goto out_init_works;
+	}
+
+	siw_touch_init_pm(ts);
+
+	ret = siw_touch_init_notify(ts);
+	if (ret) {
+		t_dev_err(dev, "failed to initialize notifier, %d\n", ret);
+		goto out_init_notify;
+	}
+	siw_touch_blocking_notifier_call(
+							LCD_EVENT_TOUCH_DRIVER_REGISTERED,
+							NULL);
+
+	t_dev_info(dev, "probe(charger) done\n");
+
+	return 0;
+
+out_init_notify:
+	siw_touch_free_pm(ts);
+	siw_touch_free_works(ts);
+
+out_init_works:
+	_siw_touch_do_remove_common(ts);
+
+	return ret;
+}
+
+static int siw_touch_do_remove_charger(void *data)
+{
+	struct siw_ts *ts = data;
+//	struct device *dev = ts->dev;
+//	struct siw_touch_pdata *pdata = (struct siw_touch_pdata *)ts->pdata;
+
+	siw_touch_blocking_notifier_call(LCD_EVENT_TOUCH_DRIVER_UNREGISTERED, NULL);
+	siw_touch_free_notify(ts);
+
+	siw_touch_free_works(ts);
+
+	_siw_touch_do_remove_common(ts);
+
+	return 0;
+}
+
+enum {
+	SIW_CORE_NORMAL = 0,
+	SIW_CORE_CHARGER,
+};
+
+static const struct siw_op_dbg siw_touch_probe_ops[2][2] = {
+	[SIW_CORE_NORMAL] = {
+		_SIW_OP_DBG(DRIVER_FREE, siw_touch_do_remove_normal, NULL, 0),
+		_SIW_OP_DBG(DRIVER_INIT, siw_touch_do_probe_normal, NULL, 0),
+	},
+	[SIW_CORE_CHARGER] = {
+		_SIW_OP_DBG(DRIVER_FREE, siw_touch_do_remove_charger, NULL, 0),
+		_SIW_OP_DBG(DRIVER_INIT, siw_touch_do_probe_charger, NULL, 0),
+	},
+};
+
+static int __siw_touch_probe_op(
+					struct siw_ts *ts,
+					void *op_func)
+{
+	struct siw_op_dbg *op = op_func;
+	int ret = 0;
+
+	t_dev_dbg_base(ts->dev, "%s begins\n", op->name);
+
+	ret = __siw_touch_op_dbg(op, ts);
+	if (ret) {
+		t_dev_err(ts->dev, "%s failed, %d\n", op->name, ret);
+		goto out;
+	}
 
 out:
 	return ret;
 }
 
-static void __siw_touch_probe_free(void *data)
+static int __siw_touch_probe_normal(struct siw_ts *ts, int on_off)
 {
-	struct siw_ts *ts = data;
-
-	if (!ts->init_late_done) {
-		return;
-	}
-
-	if (ts->is_charger) {
-		goto skip_charger;
-	}
-
-	cancel_delayed_work_sync(&ts->upgrade_work);
-	cancel_delayed_work_sync(&ts->init_work);
-
-	siw_touch_free_thread(ts);
-
-	siw_touch_free_irq(ts);
-
-	siw_ops_power(ts, POWER_OFF);
-
-skip_charger:
-	siw_touch_free_pm(ts);
-
-	siw_touch_del_sysfs(ts);
-
-	siw_ops_remove(ts);
+	return __siw_touch_probe_op(ts,
+			(void *)&siw_touch_probe_ops[SIW_CORE_NORMAL][on_off]);
 }
 
-static int siw_touch_probe_init(void *data)
+#define siw_touch_probe_normal(_ts)	\
+		__siw_touch_probe_normal(_ts, DRIVER_INIT)
+#define siw_touch_remove_normal(_ts)	\
+		__siw_touch_probe_normal(_ts, DRIVER_FREE)
+
+static int __siw_touch_probe_charger(struct siw_ts *ts, int on_off)
 {
-	struct siw_ts *ts = data;
-	int ret = 0;
-
-	mutex_lock(&ts->probe_lock);
-	ret = __siw_touch_probe_init(data);
-	mutex_unlock(&ts->probe_lock);
-
-	return ret;
+	return __siw_touch_probe_op(ts,
+			(void *)&siw_touch_probe_ops[SIW_CORE_CHARGER][on_off]);
 }
 
-static void siw_touch_probe_free(void *data)
-{
-	struct siw_ts *ts = data;
-
-	mutex_lock(&ts->probe_lock);
-	__siw_touch_probe_free(ts);
-	mutex_unlock(&ts->probe_lock);
-}
-
-static int siw_touch_probe_post(struct siw_ts *ts)
-{
-	if (t_dbg_flag & DBG_FLAG_SKIP_INIT_LATE) {
-		ts->flags &= ~TOUCH_USE_PROBE_INIT_LATE;
-	}
-	if (t_dbg_flag & DBG_FLAG_TEST_INIT_LATE) {
-		ts->flags |= TOUCH_USE_PROBE_INIT_LATE;
-	}
-
-	if (touch_flags(ts) & TOUCH_USE_PROBE_INIT_LATE) {
-		/*
-		 * Postpone actual init control
-		 * This is related to LCD_EVENT_TOUCH_INIT_LATE and
-		 * shall be controlled by MIPI via notifier
-		 */
-		ts->init_late = siw_touch_probe_init;
-		return 0;
-	}
-
-	ts->init_late = NULL;
-
-	touch_msleep(200);
-
-	return siw_touch_probe_init(ts);
-}
-
-static void siw_touch_remove_post(struct siw_ts *ts)
-{
-	siw_touch_probe_free(ts);
-}
+#define siw_touch_probe_charger(_ts)	\
+		__siw_touch_probe_charger(_ts, DRIVER_INIT)
+#define siw_touch_remove_charger(_ts)	\
+		__siw_touch_probe_charger(_ts, DRIVER_FREE)
 
 int siw_touch_probe(struct siw_ts *ts)
 {
-	struct siw_touch_pdata *pdata = NULL;
 	struct device *dev = ts->dev;
-	int ret = 0;
+
+//	BUILD_BUG_ON(sizeof(struct touch_data) != (9<<1));
 
 	t_dev_info(dev, "SiW Touch Probe\n");
 
-	ts->is_charger = !!(siw_touch_get_boot_mode() == SIW_TOUCH_CHARGER_MODE);
-
-	if (ts->is_charger) {
+	if (siw_touch_get_boot_mode() == SIW_TOUCH_CHARGER_MODE) {
 		t_dev_info(dev, "Probe - Charger mode\n");
+		return siw_touch_probe_charger(ts);
 	}
 
-	/* set defalut lpwg value because of AAT */
-	ts->role.mfts_lpwg = t_mfts_lpwg;
-
-	ts->lpwg.mode = t_lpwg_mode;
-	ts->lpwg.screen = t_lpwg_screen;
-	ts->lpwg.sensor = t_lpwg_sensor;
-	ts->lpwg.qcover = t_lpwg_qcover;
-
-	pdata = siw_touch_probe_common(ts);
-	if (!pdata) {
-		return -EINVAL;
-	}
-
-	ret = siw_touch_probe_post(ts);
-	if (ret) {
-		goto out_probe_post;
-	}
-
-	siw_touch_blocking_notifier_call(
-		LCD_EVENT_TOUCH_DRIVER_REGISTERED,
-		NULL);
-
-	t_dev_info(dev, "probe(%s) done\n",
-		(ts->is_charger) ? "charger" : "normal");
-
-	return 0;
-
-out_probe_post:
-	siw_touch_remove_common(ts);
-
-	return ret;
+	return siw_touch_probe_normal(ts);
 }
 
 int siw_touch_remove(struct siw_ts *ts)
 {
 	struct device *dev = ts->dev;
+	int ret;
 
-	siw_touch_blocking_notifier_call(
-		LCD_EVENT_TOUCH_DRIVER_UNREGISTERED,
-		NULL);
-
-	if (ts->is_charger) {
+	if (siw_touch_get_boot_mode() == SIW_TOUCH_CHARGER_MODE) {
 		t_dev_info(dev, "Remove - Charger mode\n");
+		ret = siw_touch_remove_charger(ts);
+	} else {
+		ret = siw_touch_remove_normal(ts);
 	}
-
-	siw_touch_remove_post(ts);
-
-	siw_touch_remove_common(ts);
 
 	t_dev_info(dev, "SiW Touch Removed\n");
 
-	return 0;
+	return ret;
 }
 
-int siw_touch_init_late(struct siw_ts *ts, int value)
+int siw_touch_init_late(void *data)
 {
+	struct siw_ts *ts = data;
 	struct device *dev = ts->dev;
 	int ret = 0;
 
-	if (!value) {
-		goto out;
-	}
-
 	if (!(touch_flags(ts) & TOUCH_USE_PROBE_INIT_LATE)) {
-		t_dev_info(dev, "init_late not enabled\n");
+		t_dev_info(dev, "Nop...\n");
 		goto out;
 	}
 
-	if (ts->init_late == NULL) {
-		goto out;
+	if (ts->init_late) {
+		ret = ts->init_late(ts);
+		if (ret < 0) {
+			t_dev_err(dev, "init_late failed, %d\n", ret);
+		} else {
+			t_dev_info(dev, "init_late done\n");
+		}
+
+		ts->init_late = NULL;
 	}
-
-	t_dev_info(dev, "trigger init_late\n");
-
-	ret = ts->init_late(ts);
-	if (ret < 0) {
-		atomic_set(&ts->state.core, CORE_PROBE);
-		t_dev_err(dev, "init_late failed, %d\n", ret);
-		goto out;
-	}
-
-	t_dev_info(dev, "init_late done\n");
-
-	ts->init_late = NULL;
-
-	value = 0xAA55;
-	siw_touch_atomic_notifier_call(
-		LCD_EVENT_TOUCH_INIT_LATE,
-		&value);
 
 out:
 	return ret;
 }
 
 
-#if defined(CONFIG_TOUCHSCREEN_SIWMON) || defined(CONFIG_TOUCHSCREEN_SIWMON_MODULE)
+#if defined(CONFIG_TOUCHSCREEN_SIWMON)
 
 struct siw_mon_operations *siw_mon_ops;
 EXPORT_SYMBOL(siw_mon_ops);
@@ -1853,7 +1808,6 @@ void siw_mon_deregister(void)
 EXPORT_SYMBOL_GPL(siw_mon_deregister);
 
 #endif	/* CONFIG_TOUCHSCREEN_SIWMON */
-
 
 __siw_setup_u32("siw_pr_dbg_mask=", siw_setup_pr_dbg_mask, t_pr_dbg_mask);
 __siw_setup_u32("siw_dev_dbg_mask=", siw_setup_dev_dbg_mask, t_dev_dbg_mask);

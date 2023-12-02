@@ -17,6 +17,9 @@ BUILD_FLAGS = -I$(KERNEL_DIR)
 
 EXTRA_CFLAGS = -D__KERNEL__ -DLINUX
 
+#dummy for siw_touch_cfg.h
+EXTRA_CFLAGS += -DCONFIG_TOUCHSCREEN_SIW_LG4894
+
 CONFIG_TOUCHSCREEN_SIWMON=y
 ifeq ($(CONFIG_TOUCHSCREEN_SIWMON), y)
 EXTRA_CFLAGS += -DCONFIG_TOUCHSCREEN_SIWMON
@@ -42,7 +45,7 @@ clean:
 	rm -rf *.o
 	rm -rf *.order
 	rm -rf *.symvers
-	rm -rf modules.builtin
 	rm -rf $(MODULE_NAME)
+#	rm -rf $(INSTALL_DIR)/$(MODULE_NAME)
 
 

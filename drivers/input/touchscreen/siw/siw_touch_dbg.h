@@ -2,7 +2,6 @@
  * SiW touch debug
  *
  * Copyright (C) 2016 Silicon Works - http://www.siliconworks.co.kr
- * Copyright (C) 2018 Sony Mobile Communications Inc.
  * Author: Hyunho Kim <kimhh@siliconworks.co.kr>
  *
  * This program is free software; you can redistribute it and/or
@@ -75,10 +74,7 @@ extern u32 t_dev_dbg_mask;
 		} while (0)
 
 
-#define __t_dev_none(_dev, fmt, args...)	\
-		do{	\
-			if (0) dev_printk(KERN_DEBUG, _dev, fmt, ##args);	\
-		} while (0)
+#define __t_dev_none()		do{ } while (0)
 
 #define __t_dev_info(_dev, fmt, args...)	dev_info(_dev, fmt,	##args)
 #define __t_dev_warn(_dev, fmt, args...)	dev_warn(_dev, fmt, ##args)
@@ -88,8 +84,8 @@ extern u32 t_dev_dbg_mask;
 #define t_dev_info(_dev, fmt, args...)		__t_dev_info(_dev, fmt, ##args)
 #define t_dev_warn(_dev, fmt, args...)		__t_dev_warn(_dev, fmt, ##args)
 #else
-#define t_dev_info(_dev, fmt, args...)		__t_dev_none(_dev, fmt, ##args)
-#define t_dev_warn(_dev, fmt, args...)		__t_dev_none(_dev, fmt, ##args)
+#define t_dev_info(_dev, fmt, args...)		__t_dev_none()
+#define t_dev_warn(_dev, fmt, args...)		__t_dev_none()
 #endif
 
 #define t_dev_trace(_dev, fmt, args...)		__t_dev_info(_dev, fmt, ##args)
@@ -190,12 +186,6 @@ enum {
 	/* */
 	DBG_FLAG_SKIP_IEVENT	= (1<<8),
 	DBG_FLAG_SKIP_UEVENT	= (1<<9),
-	/* */
-	DBG_FLAG_SKIP_INIT_LATE	= (1<<16),
-	DBG_FLAG_TEST_INIT_LATE	= (1<<17),
-	/* */
-	DBG_FLAG_SKIP_MON_THREAD = (1<<24),
-	DBG_FLAG_TEST_MON_THREAD = (1<<25),
 };
 
 #define ETDBOOTFAIL			((ENOMEDIUM<<3) + 0x00)
