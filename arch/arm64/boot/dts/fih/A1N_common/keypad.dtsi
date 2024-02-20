@@ -36,7 +36,7 @@
 				qcom,s1-timer = <10256>;
 				qcom,s2-timer = <500>;
 				/* RESET TYPE: SHUTDOWN(4) */
-				qcom,s2-type = <4>;
+				qcom,s2-type = <1>;
 			};
 			/* PON: RESIN */
 			qcom,pon_2 {
