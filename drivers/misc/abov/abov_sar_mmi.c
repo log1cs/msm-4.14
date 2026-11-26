@@ -40,7 +40,7 @@
 #include <asm/atomic.h>
 #include <linux/async.h>
 #include <linux/firmware.h>
-#include "base.h"
+#include "../../base/base.h"
 #define SLEEP(x)	mdelay(x)
 
 #define C_I2C_FIFO_SIZE 8

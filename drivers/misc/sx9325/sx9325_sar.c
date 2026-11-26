@@ -34,7 +34,7 @@
 
 /* main struct, interrupt,init,pointers */
 #include <linux/input/sx9325_sar.h>
-#include "base.h"
+#include "../../base/base.h"
 
 #define IDLE 0
 #define ACTIVE 1

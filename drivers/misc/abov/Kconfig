@@ -1,0 +1,5 @@
+config SARSENSOR_ABOV
+	tristate "Abov SAR sensor driver"
+	depends on SENSORS_CLASS
+	help
+	  Say Y here if you want to enable Abov SAR sensor driver.

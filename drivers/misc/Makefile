@@ -95,3 +95,6 @@ obj-$(CONFIG_MOTO_UTAGS)	+= utag/
 obj-$(CONFIG_MMI_SYS_TEMP)	+= mmi_sys_temp/
 obj-$(CONFIG_SARSENSOR_SX933X)	+= sx933x/
 obj-$(CONFIG_INPUT_AWINIC_HAPTIC)	+= awinic/
+obj-$(CONFIG_SARSENSOR_ABOV)	+= abov/
+obj-$(CONFIG_SARSENSOR_SX9325)	+= sx9325/
+obj-$(CONFIG_BU520XX_PEN)	+= pen/

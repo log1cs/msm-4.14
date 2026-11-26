@@ -889,4 +889,30 @@ config INPUT_HISI_POWERKEY
 	  To compile this driver as a module, choose M here: the
 	  module will be called hisi_powerkey.
 
+config INPUT_STMVL53L1
+	tristate "STM VL53L1 Proximity support"
+	depends on INPUT && I2C
+	help
+	  Say Y here if you want to use STMicroelectronics's proximity sensor
+	  through I2C interface.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called stmvl53l1.
+
+menuconfig INPUT_FINGERPRINT
+	bool "Fingerprints"
+	default y
+	help
+	  Say Y here, and a list of supported fingerprints will be displayed.
+	  This option doesn't affect the kernel.
+
+	  If unsure, say Y.
+
+if INPUT_FINGERPRINT
+
+source "drivers/input/misc/ets_fps_mmi/Kconfig"
+source "drivers/input/misc/fpc_fps_mmi/Kconfig"
+
+endif
+
 endif

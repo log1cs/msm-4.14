@@ -1,10 +1,6 @@
-KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
+ets_fps_mmi-y += ets_fps.o
+ets_fps_mmi-$(CONFIG_INPUT_EGISTEC_FPS_NAVI) += ets_navi_input.o
 
-all:
-	$(MAKE) -C $(KERNEL_SRC) M=$(shell pwd) modules $(KBUILD_OPTIONS)
+obj-$(CONFIG_FINGERPRINT_EGISTEC_FPS_MMI) += ets_fps_mmi.o
 
-modules_install:
-	$(MAKE) INSTALL_MOD_STRIP=1 -C $(KERNEL_SRC) M=$(shell pwd) modules_install
-
-clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) clean
+EXTRA_CFLAGS += -DCONFIG_INPUT_EGISTEC_FPS_POSE=0
