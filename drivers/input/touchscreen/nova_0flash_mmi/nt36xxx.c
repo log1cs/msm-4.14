@@ -26,7 +26,7 @@
 #include <linux/of_irq.h>
 #include <linux/power_supply.h>
 #include <linux/version.h>
-#include <linux/spi/spi-msm-geni.h>
+#include <linux/spi/spi-geni-qcom.h>
 
 #ifndef CONFIG_INPUT_TOUCHSCREEN_MMI
 #if ((LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) || defined(NVT_CONFIG_DRM_PANEL))
