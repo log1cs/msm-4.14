@@ -3444,7 +3444,7 @@ FW_force_upgrade:
 
 	himax_ts_register_interrupt();
 
-#ifdef CONFIG_TOUCHSCREEN_HIMAX_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_HIMAX_DEBUG)
 	if (himax_debug_init())
 		E(" %s: debug initial failed!\n", __func__);
 #endif
@@ -3534,7 +3534,7 @@ void himax_chip_common_deinit(void)
 	himax_remove_sysfs(ts);
 	himax_sysfs_touchscreen(ts, false);
 
-#ifdef CONFIG_TOUCHSCREEN_HIMAX_DEBUG
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_HIMAX_DEBUG)
 	himax_debug_remove();
 #endif
 

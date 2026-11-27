@@ -102,7 +102,7 @@
 
 #define HX_0F_DEBUG
 
-#ifdef CONFIG_TOUCHSCREEN_HIMAX_INCELL
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_HIMAX_INCELL)
 
 #if defined(HX_AUTO_UPDATE_FW) || defined(HX_ZERO_FLASH)
 	extern char *i_CTPM_firmware_name;
